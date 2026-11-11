@@ -348,3 +348,13 @@ T16.
   perfil descartable porque eso ejecutaría código de `gentle-pi` fuera de su entorno declarado y
   no es necesario para el ADR: la evidencia estática alcanza y lo que falta quedó marcado como
   NO VERIFICADO.
+
+### L4 — Cierre de Fase A
+
+- T1 y T2 cerradas. Entregable: `docs/adr/0001-empaquetado.md`.
+- Resultado del spike: **no ambiguo**. Recomendación adoptada: paquete Pi independiente
+  (`gentle-bounty`) sin dependencia de `gentle-pi`, con runner de subagentes propio y mínimo.
+  Fork descartado por ahora (respeta C8/S15).
+- Consecuencia registrada: la Fase D incluye un runner nuevo (~300-400 líneas estimadas, NO
+  VERIFICADO como medida real).
+- Se sigue en Checkpoint 1: no se abre Fase B hasta aprobación (S22).
