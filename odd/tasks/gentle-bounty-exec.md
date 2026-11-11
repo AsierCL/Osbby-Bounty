@@ -477,3 +477,22 @@ Checkpoint 1 APROBADO con estas resoluciones. Regístralas en el task doc como e
 - Consecuencia registrada: la Fase D incluye un runner nuevo (~300-400 líneas estimadas, NO
   VERIFICADO como medida real).
 - Se sigue en Checkpoint 1: no se abre Fase B hasta aprobación (S22).
+
+### L7 — Cierre de Fase B y Fase C (checkpoint 2)
+
+- T4-T9 (Fase B) cerradas. `bounty-core` completo: `target.ts`, `scope.ts`, `gate.ts`,
+  `ratelimit.ts`, `evidence.ts`, `redact.ts`.
+- T11-T12 (Fase C) cerradas. `proxy.ts`, ADR-0003, `docs/gate.md`, `scripts/demo-egress.ts`.
+- Suite: **126 tests, 0 fallos** (`npm test`, `node --experimental-strip-types`).
+- La suite de propiedad encontró un bug real de canonicalización: `0x7f.` se normalizaba a `0x7f`,
+  que no es la forma canónica (`0.0.0.127`). Corregido: la canonicalización es ahora un punto fijo
+  (re-parseo tras quitar el punto final). Sin la suite de propiedad, ese bug habría permitido una
+  regla de scope escrita con punto final que no matchea al host real.
+- Consecuencias aceptadas y documentadas en `docs/gate.md`: token con forma de host bajo flag
+  desconocido se deniega; un wildcard no está calificado por puerto.
+- Demostración de Fase C: `scripts/demo-egress.ts` parte A ejecutada — el proxy deniega
+  `192.0.2.1:80` **sin llamar al dialer** (log: `allowed=false reason=not in scope`). Parte B
+  (`--noproxy '*'`) **no ejecutada**: requiere la regla de firewall que aplica el humano.
+- NO VERIFICADO: la regla nftables/iptables del ADR-0003 no se aplicó; el `curl --noproxy` con
+  regla puesta no se probó; un hijo de Pi heredando `HTTP_PROXY` todavía no se probó (fase D).
+- Pendiente de aprobación humana (S22a): checkpoint 2 antes de abrir Fase D.
