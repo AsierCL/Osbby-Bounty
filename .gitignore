@@ -1,0 +1,14 @@
+# Secrets and per-program data: never committed.
+scope/
+work/
+
+# Node
+node_modules/
+*.log
+coverage/
+tmp/
+.env
+.env.*
+
+# Local lab artifacts (evidence stores produced during testing)
+evidence/

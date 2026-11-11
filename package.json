@@ -1,0 +1,15 @@
+{
+	"name": "gentle-bounty",
+	"version": "0.0.0",
+	"private": true,
+	"description": "Bug bounty control infrastructure for Pi: scope gate, rate limiting, hash-chained evidence, redaction, reports.",
+	"license": "UNLICENSED",
+	"type": "module",
+	"engines": {
+		"node": "^22.19.0 || >=23.6.0"
+	},
+	"scripts": {
+		"test": "node --experimental-strip-types --test tests/",
+		"typecheck": "node --experimental-strip-types --check-to-run"
+	}
+}
