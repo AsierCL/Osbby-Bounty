@@ -13,10 +13,12 @@
  *   - `*.acme.com`      → one or more labels below `acme.com`. It does not cover the apex.
  *   - `*` or `*.*.com`  → rejected at parse time.
  *   - `host:8443`       → the port must match exactly.
+ *   - a wildcard rule is **not** port-qualified: `*.acme.com` covers every port of every name it
+ *     matches. To constrain one host's port, the scope must not also grant that host via a wildcard.
  *   - `host/static/*`   → the path must start with `/static/`.
  *   - an IP rule matches IPs only; a name rule never matches an IP.
  */
-import { canonicalHost, parseTarget, type Target } from "./target.ts";
+import { parseLooseHost, parseTarget, type Target } from "./target.ts";
 
 export interface ScopeRule {
 	raw: string;
@@ -470,12 +472,12 @@ export function evaluate(
 	target: Pick<Target, "host" | "path" | "port"> | { host: string },
 ): ScopeVerdict {
 	const rawHost = typeof target?.host === "string" ? target.host : "";
-	const host = canonicalHost(rawHost);
-	if (host === null) {
+	const parsed = parseLooseHost(rawHost);
+	if (parsed === null) {
 		return { verdict: "unknown", reason: `host is not canonicalizable: ${JSON.stringify(rawHost)}` };
 	}
-	const parsed = parseTarget(rawHost);
-	const isIp = parsed.ok ? parsed.target.isIp : false;
+	const host = parsed.host;
+	const isIp = parsed.isIp;
 	const path = typeof target.path === "string" && target.path.length > 0 ? target.path : "/";
 	const port = typeof target.port === "number" ? target.port : null;
 

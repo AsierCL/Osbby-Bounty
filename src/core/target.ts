@@ -114,6 +114,28 @@ export function parseTarget(input: string): ParseResult {
 		if (withoutTrailingDots !== host) {
 			normalizations.push("trailing-dot");
 			host = withoutTrailingDots;
+			// Stripping the dot can turn an IPv4-looking spelling into a different parse
+			// (`0x7f.` → `0x7f` → `0.0.0.127`). Canonicalization must be a fixed point, so re-parse
+			// the stripped host and adopt its result instead of inventing a third spelling.
+			if (host !== url.hostname) {
+				const again = parseTarget(host);
+				if (!again.ok) return { ok: false, error: again.error };
+				return {
+					ok: true,
+					target: {
+						...again.target,
+						raw: input,
+						scheme: again.target.scheme ?? scheme,
+						normalizations: [...new Set([...normalizations, ...again.target.normalizations])],
+						userinfo:
+							again.target.userinfo ??
+							(url.username === "" && url.password === ""
+								? null
+								: `${url.username}${url.password === "" ? "" : `:${url.password}`}`),
+						port: again.target.port ?? (url.port === "" ? null : Number(url.port)),
+					},
+				};
+			}
 		}
 		const strippedSpelling = spelling.replace(/\.+$/, "");
 		if (strippedSpelling !== strippedSpelling.toLowerCase()) normalizations.push("case-folded");
@@ -152,6 +174,19 @@ export function parseTarget(input: string): ParseResult {
 
 /** Canonical host for a bare host string, or `null` when it cannot be canonicalized. */
 export function canonicalHost(input: string): string | null {
-	const parsed = parseTarget(input);
-	return parsed.ok ? parsed.target.host : null;
+	return parseLooseHost(input)?.host ?? null;
+}
+
+/**
+ * Parse a host that may arrive already canonicalized, including a bare IPv6 literal (`::1`, which a
+ * URL authority cannot express without brackets). Everything else still fails closed.
+ */
+export function parseLooseHost(input: string): Target | null {
+	const direct = parseTarget(input);
+	if (direct.ok) return direct.target;
+	if (input.includes(":") && /^[0-9a-fA-F:.]+$/.test(input)) {
+		const bracketed = parseTarget(`[${input}]`);
+		if (bracketed.ok) return bracketed.target;
+	}
+	return null;
 }
