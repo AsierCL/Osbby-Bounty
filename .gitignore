@@ -10,8 +10,8 @@ tmp/
 .env
 .env.*
 
-# Local lab artifacts (evidence stores produced during testing)
-evidence/
+# Local lab artifacts: the evidence store lives under work/<program>/evidence, already covered by
+# `work/`. Do NOT ignore `evidence/` globally: that also swallowed docs/evidence/.
 
 # Lab runtime: pid, port and log
 .lab/
