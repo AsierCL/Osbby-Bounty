@@ -19,14 +19,22 @@ Una acción se deniega en el primer chequeo que falla. No hay "warn and continue
 7. **DNS**: si resolver falla, se deniega. Si un CNAME apunta fuera de alcance, se deniega nombrando
    el destino.
 
-## Consecuencia 1: un token con forma de host bajo un flag desconocido se deniega
+## Escaneo genérico de argv (S24)
 
-`nuclei --whatever ambiguous.json` se deniega: `ambiguous.json` podría ser un nombre de host. El gate
-no adivina. Para que no moleste, hay una lista explícita de flags cuyo valor es una ruta local
-(`-o`, `-t`, `-w`, `--config`, `--output-dir`, …). Si aparece una tool nueva con un flag de archivo
-nuevo, se agrega a esa lista — es una decisión de código, revisable, no un umbral difuso.
+No hay perfiles por herramienta. Cada token que **parsea como host, URL o IP** se valida contra el
+alcance, sin importar qué flag lo acompañe. Una tool nueva funciona sin configuración previa.
 
-## Consecuencia 2: un wildcard no está calificado por puerto
+Un token que **no parsea como host** no bloquea: se anota en las notas del gate y el run sigue. Por
+eso `-rl 150`, `-severity critical,high` o `frobnicate` no molestan.
+
+Queda una lista global y corta de flags cuyo valor es una **ruta local** (`-o`, `-t`, `-w`,
+`--config`, `--output-dir`, …), para que `-o out.json` no se confunda con un host. Es una lista
+global, no un perfil por herramienta: si aparece una tool nueva con un flag de archivo nuevo, se
+agrega ahí.
+
+Host-shaped token que sí parsea y está fuera de alcance ⇒ **se deniega**. Es la línea roja #1.
+
+## Limitación conocida: un wildcard no está calificado por puerto (S25, aplazada)
 
 `*.acme.com` cubre **todos** los puertos de todos los nombres que matchea. Si el programa dice
 `*.acme.com`, entonces `api.acme.com:9999` está en alcance por esa regla, y una regla
@@ -36,6 +44,8 @@ hay que no otorgar el host por wildcard.
 Se eligió así porque refleja cómo las plataformas describen el alcance y porque el matcher
 alternativo ("la regla más específica gana") vuelve imposible razonar sobre el scope con la lectura
 lineal del programa.
+
+**Estado: aplazada.** No bloquea fases D ni E. Se corrige cuando convenga.
 
 ## Semántica de las reglas
 

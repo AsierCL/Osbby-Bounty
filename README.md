@@ -1,21 +1,71 @@
 # gentle-bounty
 
-Infraestructura de control para bug bounty sobre Pi: scope, gate de ejecución, rate limiting,
-evidencia con cadena de hashes, redacción y reportes.
+Infraestructura de control para bug bounty sobre Pi. No es un escáner: es la capa que decide qué se
+puede tocar, a qué ritmo, con qué registro y con qué evidencia.
 
-**Estado: Fase A (spike de empaquetado). Nada funcional todavía.**
+**Estado: Fase D (adaptador Pi).** El núcleo está testeado; la extensión todavía no corrió dentro de
+una sesión de Pi real.
 
-- Núcleo: `bounty-core`, TypeScript sin dependencias de Pi ni de terceros. Testeable sin LLM.
-- Adaptador: extensión Pi fina encima del núcleo.
-- Alcance de pruebas: **solo localhost y laboratorios locales propios**. Sin hosts reales.
+## Dos líneas rojas
 
-Documentación:
+1. **Nunca tocar nada fuera de scope.**
+2. **Nunca fuerza bruta, DoS/DDoS ni ninguna clase destructiva sin confirmación explícita.**
 
-- `odd/tasks/gentle-bounty-exec.md` — especificación y tracking del trabajo (S#, T#, L#).
-- `docs/adr/` — decisiones de arquitectura.
+Todo lo demás prioriza autonomía y fricción mínima.
 
-## Reglas del repo
+## Cómo se usa
 
-- `scope/` y `work/` nunca se commitean (ver `.gitignore`).
-- Cero dependencias de runtime en `bounty-core`.
-- Nada de payloads ni exploits: esto es control, no ataque.
+```bash
+# 1. Scope del programa (lo escribe el humano, no el agente)
+work/acme/scope.yaml
+
+# 2. Dentro de Pi, con la extensión cargada
+bounty_scope { program: "acme", file: "work/acme/scope.yaml" }
+#   → resumen en lenguaje llano + una única confirmación
+bounty_run   { program: "acme", tool: "httpx", args: ["-u","https://a.acme.com"], target: "https://a.acme.com" }
+bounty_phase { program: "acme", phase: "recon" }
+bounty_status{ program: "acme" }
+```
+
+Cada transición reescribe `work/<program>/status.md`: qué fase corre, qué se encontró, qué espera
+confirmación y qué sigue. `bounty_status` devuelve ese mismo texto, así que el humano y el modelo
+leen lo mismo.
+
+## Estructura
+
+| Ruta | Qué es |
+|---|---|
+| `src/core/` | `bounty-core`: scope, gate, limiter, evidencia encadenada, redactor, proxy. Sin dependencias, sin Pi |
+| `src/pi/` | Runner de subagentes y sesión del programa |
+| `extensions/` | Shim delgado que registra las seis tools en Pi |
+| `assets/` | Identidad, protocolo de siete fases, agentes con allowlist |
+| `work/<programa>/` | Estado, hallazgos, evidencia y reportes (**gitignored**) |
+
+## Condiciones de uso
+
+- **Este diseño depende de que la sesión de bounty no comparta contexto con otra sesión que tenga
+  `bash` libre** (por ejemplo un agente de coding en el mismo workspace). Si conviven, la otra sesión
+  puede `curl` y el gate no la ve. Es una condición de uso, no un control técnico.
+- `scope/` y `work/` nunca se commitean.
+- Las credenciales de cuentas de prueba viven en `.bounty/config.json` (gitignored) y se pasan
+  directo a los argumentos. No hay vault ni alias.
+- **La redacción de credenciales está apagada por defecto** (`GENTLE_BOUNTY_REDACTION=on` para
+  prenderla). El evidence store guarda el crudo igual.
+
+## Tests
+
+```bash
+npm test           # 150+ tests, sin red, sin modelo, sin Pi
+npm run test:live  # smoke real: un `pi` hijo con prompt mínimo y workspace vacío (opt-in)
+```
+
+Los tests no hacen DNS real, no abren sockets fuera de localhost y no ejecutan código de terceros.
+
+## Documentación
+
+- `docs/adr/0001` — empaquetado (paquete aparte, runner propio)
+- `docs/adr/0002` — toolchain (`node --experimental-strip-types`, sin build)
+- `docs/adr/0003` — cierre de la vía `bash` (histórico; su firewall ya no es requisito)
+- `docs/adr/0004` — el control es de configuración, no de red
+- `docs/gate.md` — orden de decisión del gate y limitaciones conocidas
+- `docs/config.md` — variables de entorno y archivo de credenciales
