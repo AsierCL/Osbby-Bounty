@@ -633,6 +633,65 @@ Sigo sin cargar ningún scope real. En cuanto corra la prueba manual de confirm-
 resultado — con eso cerramos GO/NO-GO definitivo.
 ```
 
+### S57 — Documentación para operar solo (enmienda)
+
+```
+1. docs/PRIMERA-SESION.md (español llano, 1-2 páginas): guion para mi primera sesión VIVA en el
+   lab, hecha por mí en una terminal. Debe incluir:
+   a) Comandos exactos para levantar y parar el lab (si no hay script, creá scripts/lab-up.sh y
+      scripts/lab-down.sh, solo localhost) y para lanzar bin/gentle-bounty contra work/lab.
+   b) Un prompt inicial que yo pueda pegar para pedirle recon completo del lab.
+   c) Tres escenarios con "qué debería pasar y qué vería yo":
+      (i) recon normal que termina en un finding de IDOR verificado + reporte;
+      (ii) una acción destructiva que dispare la confirmación: pasos para responder NO y verificar
+      que no se ejecutó nada, y luego SÍ y verificar que se ejecutó. Esto es S43: integralo
+      con docs/evidence/confirm-live.md, no lo dupliques;
+      (iii) un intento de salir de scope, con la razón legible en status.md.
+   d) Cómo leer status.md durante la sesión y cómo parar todo (bounty_stop / comando de emergencia).
+   e) Qué hacer si el agente "se pierde" (explora el repo en vez de usar las tools de bounty, como
+      pasó en tus intentos de S43): cómo reconocerlo y cómo reportarlo para ajustarlo.
+```
+
+### S58 — Plantilla y guía de scope
+
+```
+2. Plantilla de scope para un programa real: scope.template.yaml con comentarios en español llano
+   en cada campo del esquema actual (lab: false, rate_rps, required_headers, in_scope/out_of_scope
+   y los demás que acepte hoy), más docs/COMO-ESCRIBIR-UN-SCOPE.md (1 página): cómo pasar las reglas
+   de un programa a este YAML, qué hacer ante ambigüedades (ante la duda: no incluirlo, o ponerlo en
+   out_of_scope), qué rate_rps poner si el programa no declara ninguno (sugerí un valor conservador
+   y explicá por qué) y cómo leer el resumen de bounty_scope antes de confirmar. Incluí 3 errores
+   típicos al escribir un scope. Si algún campo que ya habíamos acordado (política de automatización,
+   puertos por defecto) no existe en el esquema, anotalo en docs/DEUDA.md sin implementarlo.
+```
+
+### S59 — Pre-flight de solo lectura
+
+```
+3. Pre-flight: bin/gentle-bounty --preflight <programa>. NO lanza nada: solo imprime un veredicto
+   OK/NO en lenguaje llano, comprobando:
+   - variables del stub sin definir, y GENTLE_BOUNTY_PRELOAD_SCOPE sin definir;
+   - el scope parsea y tiene lab explícito;
+   - rate_rps declarado;
+   - binarios necesarios instalados (indicá cuáles faltan, sin instalarlos);
+   - presupuesto configurado;
+   - árbol git limpio.
+   Con tests. Es lectura pura: sin red y sin ejecutar herramientas de bounty.
+```
+
+### S60 — Observación sobre el agente perdido (sin acción)
+
+```
+4. Observación, sin acción: en tus intentos de S43 el modelo exploró el repo en vez de llamar a
+   bounty_run. Eso sugiere que "el agente caza bien con estas tools" no está demostrado de punta a
+   punta. Si al preparar el guion del punto 1 ves algo en los assets o el protocolo que pueda causar
+   eso, anotalo en docs/DEUDA.md como hipótesis, sin cambiar nada todavía.
+```
+
+```
+Sigo sin cargar ningún scope real. Cuando termines, informá con el formato habitual y pará.
+```
+
 ## Tasks
 
 | ID | Tarea | Spec | Ruta | Commit |
@@ -1355,3 +1414,81 @@ S51 en adelante.
 Sigo sin cargar ningún scope real. En cuanto corra la prueba manual de confirm-live.md te paso el
 resultado — con eso cerramos GO/NO-GO definitivo.
 ```
+
+### L21 — Checkpoint 8: enmiendas S57-S60 (verbatim)
+
+```text
+Checkpoint 8 recibido. S54, S55, S56 APROBADOS. Registrá esto como S57 en adelante.
+
+Contexto: no hay decisiones técnicas pendientes. Lo único abierto es mi prueba manual de S43 y el
+GO/NO-GO, que son míos. Mientras tanto, prepará lo que me falta para operar la herramienta yo solo.
+No toques el gate, el runner ni el proxy: nada de código de enforcement nuevo.
+
+1. docs/PRIMERA-SESION.md (español llano, 1-2 páginas): guion para mi primera sesión VIVA en el
+   lab, hecha por mí en una terminal. Debe incluir:
+   a) Comandos exactos para levantar y parar el lab (si no hay script, creá scripts/lab-up.sh y
+      scripts/lab-down.sh, solo localhost) y para lanzar bin/gentle-bounty contra work/lab.
+   b) Un prompt inicial que yo pueda pegar para pedirle recon completo del lab.
+   c) Tres escenarios con "qué debería pasar y qué vería yo":
+      (i) recon normal que termina en un finding de IDOR verificado + reporte;
+      (ii) una acción destructiva que dispare la confirmación: pasos para responder NO y verificar
+      que no se ejecutó nada, y luego SÍ y verificar que se ejecutó. Esto es S43: integralo
+      con docs/evidence/confirm-live.md, no lo dupliques;
+      (iii) un intento de salir de scope, con la razón legible en status.md.
+   d) Cómo leer status.md durante la sesión y cómo parar todo (bounty_stop / comando de emergencia).
+   e) Qué hacer si el agente "se pierde" (explora el repo en vez de usar las tools de bounty, como
+      pasó en tus intentos de S43): cómo reconocerlo y cómo reportarlo para ajustarlo.
+
+2. Plantilla de scope para un programa real: scope.template.yaml con comentarios en español llano
+   en cada campo del esquema actual (lab: false, rate_rps, required_headers, in_scope/out_of_scope
+   y los demás que acepte hoy), más docs/COMO-ESCRIBIR-UN-SCOPE.md (1 página): cómo pasar las reglas
+   de un programa a este YAML, qué hacer ante ambigüedades (ante la duda: no incluirlo, o ponerlo en
+   out_of_scope), qué rate_rps poner si el programa no declara ninguno (sugerí un valor conservador
+   y explicá por qué) y cómo leer el resumen de bounty_scope antes de confirmar. Incluí 3 errores
+   típicos al escribir un scope. Si algún campo que ya habíamos acordado (política de automatización,
+   puertos por defecto) no existe en el esquema, anotalo en docs/DEUDA.md sin implementarlo.
+
+3. Pre-flight: bin/gentle-bounty --preflight <programa>. NO lanza nada: solo imprime un veredicto
+   OK/NO en lenguaje llano, comprobando:
+   - variables del stub sin definir, y GENTLE_BOUNTY_PRELOAD_SCOPE sin definir;
+   - el scope parsea y tiene lab explícito;
+   - rate_rps declarado;
+   - binarios necesarios instalados (indicá cuáles faltan, sin instalarlos);
+   - presupuesto configurado;
+   - árbol git limpio.
+   Con tests. Es lectura pura: sin red y sin ejecutar herramientas de bounty.
+
+4. Observación, sin acción: en tus intentos de S43 el modelo exploró el repo en vez de llamar a
+   bounty_run. Eso sugiere que "el agente caza bien con estas tools" no está demostrado de punta a
+   punta. Si al preparar el guion del punto 1 ves algo en los assets o el protocolo que pueda causar
+   eso, anotalo en docs/DEUDA.md como hipótesis, sin cambiar nada todavía.
+
+Sigo sin cargar ningún scope real. Cuando termines, informá con el formato habitual y pará.
+```
+
+### L22 — S57, S58, S59 y S60 cerrados (sin código de enforcement)
+
+**S57 — guion de primera sesión.** `docs/PRIMERA-SESION.md` (1.5 páginas, castellano llano):
+comandos de lab y sesión, prompt inicial para pegar, los tres escenarios con "qué debería pasar / qué
+verías", lectura de `status.md`, parada ordenada (`bounty_stop`) y de golpe (`Ctrl+C` + `lab-down`), y
+qué hacer si el agente se pierde. Nuevos: `scripts/lab-serve.ts`, `scripts/lab-up.sh`,
+`scripts/lab-down.sh`, `.lab/` en `.gitignore`. **Probados de verdad** contra loopback: arriba, puerto
+en `.lab/port`, `curl` devuelve la factura de bob y la inyección plantada, y baja limpio.
+
+**S58 — plantilla y guía de scope.** `scope.template.yaml` con todos los campos que el esquema acepta
+hoy, comentados en castellano, y `docs/COMO-ESCRIBIR-UN-SCOPE.md` (1 página): traducción de reglas,
+"ante la duda, afuera", `rate_rps: 2` cuando el programa no declara con el razonamiento, cómo leer el
+resumen de `bounty_scope`, tres errores típicos y los errores del parser.
+
+**S59 — preflight.** `bin/gentle-bounty --preflight <programa>`: veredicto OK/NO con seis chequeos
+(variables de test, scope + lab explícito, rate, binarios, presupuesto, árbol git). Read-only de
+verdad: no crea `work/`, no lanza `pi`, no toca la red (hay un test que lo comprueba comparando el
+árbol antes y después). 10 tests. Detalle honesto que surgió: el `httpx` del PATH es el cliente de
+Python, no el de Project Discovery — el preflight lo avisa.
+
+**S60 — observaciones sin acción.** `docs/DEUDA.md` §6: hipótesis de por qué el agente explora el repo
+(la extensión registra tools pero **no inyecta identidad ni protocolo** en el system prompt), con
+evidencia y arreglo propuesto **no implementado**. §7: el campo acordado "puertos por defecto" **no
+existe** en el esquema; documentado. §8: la ambigüedad de `httpx`.
+
+Estado: **257 tests, 0 fallos**. Nada de enforcement tocado (gate, runner y proxy sin cambios).

@@ -1,0 +1,98 @@
+# Scope de un programa real — plantilla comentada
+#
+# Copiá este archivo a work/<programa>/scope.yaml y completalo. Todo lo que está entre comillas es
+# una regla del programa. Los comentarios con "#" no se leen, son para vos.
+#
+# Regla de oro: si dudás de si algo está en alcance, NO lo pongas en in_scope. Ante la duda, afuera.
+
+# ─── Obligatorios ────────────────────────────────────────────────────────────────
+
+# Nombre corto del programa. Se usa para la carpeta work/<programa>/ y para las tools.
+program: acme
+
+# ¿Es un laboratorio tuyo o un programa real? Es obligatorio, no tiene default.
+#   false = programa real (las atafetas de test de confirmación quedan bloqueadas)
+#   true  = laboratorio propio (solo ahí se permiten las atafetas de test)
+# Poner true en un programa real es mentirle a la herramienta: no lo hagas.
+lab: false
+
+# ─── Recomendados ───────────────────────────────────────────────────────────────
+
+# Plataforma del programa. Informativo: queda en el reporte y en status.md.
+platform: hackerone
+
+# Fecha en la que leíste y aceptaste las reglas del programa. Si falta, bounty_scope te avisa.
+authorized_on: 2026-11-12
+
+# ─── Alcance ────────────────────────────────────────────────────────────────────
+#
+# Semántica exacta (está en docs/gate.md):
+#   acme.com        → ese host exacto. NO incluye subdominios.
+#   *.acme.com      → subdominios. NO incluye el apex. Cubre TODOS los puertos.
+#   api.acme.com:8443 → ese host, solo ese puerto.
+#   *.acme.com/static/* → ese host y ese prefijo de path.
+#   *  o  *.*.com   → se rechaza al parsear (sin wildcards sueltos).
+#
+# Qué NO va acá: dominios que no son del programa, hosts de terceros, "por si acaso".
+
+in_scope:
+  - "*.acme.com"
+  - acme.com
+  # - api.acme.com:8443
+
+# Lo que el programa dice explícitamente que NO se toca. Gana siempre sobre in_scope,
+# aunque una regla de arriba lo cubra.
+out_of_scope:
+  - admin.acme.com
+  # - "*.acme.com/static/*"
+  # - "status.acme.com"
+
+# ─── Límites ────────────────────────────────────────────────────────────────────
+
+limits:
+  # Peticiones por segundo por host. OBLIGATORIO en la práctica: si falta, el gate niega todo.
+  # Si el programa no declara uno, poné 2 y dejá la nota en notes. Ver docs/COMO-ESCRIBIR-UN-SCOPE.md.
+  rate_rps: 2
+
+  # Techo diario de peticiones. Opcional. Si lo declarás, el runner lo respeta y se frena solo.
+  max_requests_per_day: 5000
+
+  # Clases que el programa prohíbe. Se suman a las clases destructivas que el gate ya infiere.
+  # Valores útiles: dos, ddos, brute-force, password-spray, credential-stuffing, fuzzing-flood
+  forbidden:
+    - dos
+    - brute-force
+    - password-spray
+
+  # Métodos HTTP permitidos. Lista vacía = sin restricción del programa.
+  allowed_methods:
+    - GET
+    - POST
+
+  # Qué hacer si el target responde un redirect:
+  #   reject     = no se siguen (default, y lo que elige casi todo programa)
+  #   revalidate = se siguen, pero cada salto se vuelve a validar contra el scope
+  redirects: reject
+
+# ─── Cabeceras obligatorias ─────────────────────────────────────────────────────
+
+# Si el programa te pide identificarte en cada request, va acá y el gate exige que estén presentes.
+required_headers:
+  # X-Bounty-Id: "acme-2026-1234"
+
+# ─── Política de automatización del programa ────────────────────────────────────
+
+# Lo que el programa dice sobre escaneo automático y reportes asistidos por IA.
+#   allowed | forbidden | unknown (si no dice nada, dejá unknown)
+automation:
+  ai_assisted_reports: unknown
+  automated_scanning: unknown
+
+# ─── Notas ──────────────────────────────────────────────────────────────────────
+
+# El texto del programa, pegado tal cual, y cualquier duda que quieras dejar registrada.
+# Esto es lo que hace defendible la sesión: si alguien pregunta "¿por qué este host?",
+# la respuesta está acá.
+notes: |
+  Texto del programa pegado tal cual (o el enlace y la fecha).
+  Dudas anotadas: ...

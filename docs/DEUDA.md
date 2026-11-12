@@ -56,3 +56,48 @@ confirmación sin humano, y `GENTLE_BOUNTY_PRELOAD_SCOPE` carga un scope sin pau
 Desde S47 esto **no puede pasar en el camino normal**: el scope exige `lab: true|false`, el stub solo
 responde con `lab: true`, y un alcance real con el stub activo **se niega a cargar** dejando el error
 en `status.md`. Queda como atafeta de verificación, con dos variables y log en cada uso.
+
+## 6. El agente explora el repo en vez de cazar (S60, hipótesis, sin acción)
+
+**Síntoma observado** (tres corridas reales durante S43): en vez de llamar `bounty_run`, el modelo
+hizo `ls`, `find` y `read` sobre el repo. Una vez llamó `bounty_run` antes de que el scope terminara
+de cargar (bug aparte, ya corregido: el preload se espera).
+
+**Hipótesis principal**: la extensión **registra las tools pero no inyecta el encuadre**. Ni
+`assets/identity.md` ni `assets/protocol.md` llegan al system prompt de la sesión: el modelo ve el
+preámbulo genérico de Pi ("You are a coding assistant running inside pi…"), siete tools sueltas con
+su `description`, y nada que le diga "sos un bounty hunter, toda acción contra un target pasa por
+`bounty_run`, no explores el repo". Un agente sin encuadre hace lo que su prompt por defecto le
+enseñó: mirar el código.
+
+**Evidencia a favor**: las tools tienen descripciones correctas y aun así el modelo no las usó; cuando
+se lo encuadró explícitamente en el prompt del humano, llamó `bounty_run` (una de tres veces, lo que
+también sugiere que el encuadre por prompt del usuario no siempre alcanza).
+
+**Arreglo propuesto, NO implementado** (toca el arranque de sesión, no el enforcement):
+inyectar `identity.md` + `protocol.md` en el system prompt desde la extensión
+(`before_agent_start` con `systemPromptOptions.sections`, o `promptGuidelines` por tool). Antes de
+tocarlo quiero el resultado de la prueba manual del humano: si con su encuadre el agente caza bien, el
+problema es de prompt y no de diseño de herramientas.
+
+**Por qué no es bloqueante**: las dos líneas rojas se sostienen igual. Un agente que explora no toca
+nada fuera de scope ni ejecuta nada destructivo: simplemente no avanza. El costo es tiempo, no
+seguridad.
+
+## 7. Campo acordado que no existe en el esquema: puertos por defecto (S58)
+
+Se habló de una política de "puertos por defecto" para el scope. **No existe en el esquema actual**:
+los puertos solo aparecen (a) dentro de una regla (`api.acme.com:8443`), o (b) implícitos en un
+wildcard, que cubre **todos** los puertos de los nombres que matchea.
+
+Consecuencia práctica: hoy no se puede decir "para `*.acme.com` solo 443 y 8443". Para restringir un
+puerto hay que enumerar hosts con puerto y no otorgar el wildcard.
+
+Documentado acá, **sin implementar**, como pidió S58. Si algún día se implementa, el lugar natural es
+`limits.allowed_ports` con semántica de intersección con las reglas.
+
+## 8. `httpx` del PATH no es el de Project Discovery (S59)
+
+El preflight avisa: en este host `/usr/bin/httpx` es el **cliente HTTP de Python**, no la herramienta
+de Project Discovery. Si algún día se usa `httpx` como binario de recon, hay que verificar cuál está
+primero en el PATH. Hoy el flujo del lab usa `curl`, así que no afecta.

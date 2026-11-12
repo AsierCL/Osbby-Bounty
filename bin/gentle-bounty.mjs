@@ -65,7 +65,104 @@ export function buildLaunch({ program, root, probeFile, approvedMcp, extra = [] 
 	};
 }
 
-function main(argv) {
+async function preflight(program, root) {
+	const { parseScope } = await import("../src/core/scope.ts");
+	const { loadGlobalConfig } = await import("../src/core/config.ts");
+	const { execFileSync } = await import("node:child_process");
+	const { existsSync, readFileSync } = await import("node:fs");
+	const { join } = await import("node:path");
+
+	const lines = [];
+	const failures = [];
+	const warnings = [];
+	const ok = (message) => lines.push(`OK    ${message}`);
+	const warn = (message) => {
+		warnings.push(message);
+		lines.push(`AVISO ${message}`);
+	};
+	const fail = (message) => {
+		failures.push(message);
+		lines.push(`FALLA ${message}`);
+	};
+
+	// 1. test affordances must be off
+	for (const name of ["GENTLE_BOUNTY_ALLOW_CONFIRM_STUB", "GENTLE_BOUNTY_CONFIRM_TEST", "GENTLE_BOUNTY_PRELOAD_SCOPE"]) {
+		if (process.env[name] !== undefined && process.env[name] !== "") fail(`la variable ${name} está definida: las atafetas de test no van en una sesión real`);
+	}
+	if (failures.length === 0) ok("variables de test sin definir");
+
+	// 2. scope parses, with an explicit lab flag
+	const scopePath = join(root, "work", program, "scope.yaml");
+	let policy = null;
+	if (!existsSync(scopePath)) {
+		fail(`no encuentro el scope en ${scopePath}`);
+	} else {
+		const parsed = parseScope(readFileSync(scopePath, "utf8"));
+		if (!parsed.ok) {
+			fail(`el scope no parsea: ${parsed.errors.slice(0, 3).join("; ")}`);
+		} else {
+			policy = parsed.policy;
+			ok(`el scope parsea y declara lab: ${parsed.policy.lab}`);
+			for (const warning of parsed.warnings) warn(`el scope avisa: ${warning}`);
+		}
+	}
+
+	// 3. rate declared
+	if (policy !== null) {
+		if (policy.limits.rateRps === null) fail("el scope no declara limits.rate_rps: sin eso el gate niega todo");
+		else ok(`ritmo declarado: ${policy.limits.rateRps} req/s`);
+	}
+
+	// 4. binaries: curl is required for the lab flow, the rest are optional
+	const has = (binary) => {
+		try {
+			execFileSync("sh", ["-c", `command -v ${binary}`], { stdio: "ignore" });
+			return true;
+		} catch {
+			return false;
+		}
+	};
+	if (!has("curl")) fail("falta curl: es la herramienta con la que el lab se recorre hoy");
+	else ok("curl instalado");
+	const optional = ["jq", "nuclei", "httpx", "ffuf", "subfinder"];
+	const missing = optional.filter((binary) => !has(binary));
+	if (missing.length === 0) ok("binarios opcionales presentes");
+	else warn(`faltan binarios opcionales (no los instalo): ${missing.join(", ")}. Ojo: el httpx del PATH puede ser el cliente de Python, no el de Project Discovery`);
+
+	// 5. budget
+	try {
+		const config = await loadGlobalConfig(async (path) => readFileSync(path, "utf8"), join(root, ".bounty", "config.json"));
+		const budget = config.budget ?? {};
+		if (Object.keys(budget).length === 0) {
+			warn("no hay presupuesto configurado en .bounty/config.json: se usan los defaults (45 min, 40 llamadas, 2M tokens)");
+		} else {
+			ok(`presupuesto configurado: ${JSON.stringify(budget)}`);
+		}
+	} catch (error) {
+		fail(`la configuración no es válida: ${error.message}`);
+	}
+
+	// 6. git tree
+	try {
+		const status = execFileSync("git", ["-C", root, "status", "--porcelain"], { encoding: "utf8" }).trim();
+		if (status === "") ok("árbol git limpio");
+		else if (policy !== null && policy.lab === true) warn("el árbol git tiene cambios (en un lab no importa)");
+		else fail("el árbol git tiene cambios sin commitear: antes de un programa real, dejalo limpio");
+	} catch {
+		warn("no pude leer el estado de git (¿este directorio no es un repo?)");
+	}
+
+	lines.push("");
+	if (failures.length === 0) {
+		lines.push(`VEREDICTO: OK — podés arrancar ${program}${warnings.length > 0 ? ` (con ${warnings.length} aviso(s) arriba)` : ""}`);
+	} else {
+		lines.push(`VEREDICTO: NO — ${failures.length} cosa(s) para corregir antes de arrancar`);
+	}
+	for (const line of lines) console.log(line);
+	return failures.length === 0 ? 0 : 1;
+}
+
+async function main(argv) {
 	const check = argv.includes("--check");
 	const probeIndex = argv.indexOf("--probe");
 	const probeFile = probeIndex >= 0 ? argv[probeIndex + 1] : undefined;
@@ -82,6 +179,17 @@ function main(argv) {
 		console.error("usage: gentle-bounty <program> [--check] [--probe <file>] [-- <pi args>]");
 		process.exit(2);
 	}
+	const preflightIndex = argv.indexOf("--preflight");
+	if (preflightIndex >= 0) {
+		const target = argv[preflightIndex + 1];
+		if (!target || target.startsWith("--")) {
+			console.error("usage: gentle-bounty --preflight <programa>");
+			process.exit(2);
+		}
+		const scopeRoot = process.env.GENTLE_BOUNTY_ROOT ?? process.cwd();
+		process.exit(await preflight(target, scopeRoot));
+	}
+
 	const approvedMcp = (process.env.GENTLE_BOUNTY_MCP ?? "").split(",").map((entry) => entry.trim()).filter(Boolean);
 	const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 	let launch;
@@ -111,4 +219,4 @@ function main(argv) {
 	process.exit(result.status ?? 0);
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) main(process.argv.slice(2));
+if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) await main(process.argv.slice(2));

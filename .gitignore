@@ -12,3 +12,6 @@ tmp/
 
 # Local lab artifacts (evidence stores produced during testing)
 evidence/
+
+# Lab runtime: pid, port and log
+.lab/
