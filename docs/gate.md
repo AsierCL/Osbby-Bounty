@@ -117,6 +117,14 @@ es `lab: false`, la sesión **se niega a cargar el alcance** y lo deja escrito e
 segunda barrera: aunque algo saltara esa puerta, `resolveConfirm` no deja que el stub responda fuera
 de un lab.
 
+## Anclaje del CVSS (S55)
+
+El score del reporte se calcula con la tabla oficial de CVSS v4.0 vendoreada de FIRST. **Segundo
+anclaje real-world: no disponible hoy por falta de adopción de NVD**; la validación descansa en la
+tabla oficial de 270 entradas + invariantes (monotonicidad, interpolación) + extremos 10.0/0.0. Es
+deuda marcada, no bloqueante, y no se reabre sin una fuente nueva y confirmada. Detalle y evidencia
+de las consultas a NVD: `docs/DEUDA.md` §4 y `docs/evidence/nvd/`.
+
 ## Semántica de las reglas
 
 | Regla | Matchea | No matchea |

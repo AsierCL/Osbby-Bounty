@@ -26,7 +26,17 @@ El mecanismo está verificado con proceso real y con la firma documentada de `ct
 falta verificar es el diálogo de Pi y la tecla del humano. Detalle, intentos fallidos y procedimiento
 manual: `docs/evidence/confirm-live.md`.
 
-## 4. CVSS v4.0: cerrado, con dos límites
+## 4. CVSS v4.0: cerrado, con dos límites (S55: no se reabre sin fuente nueva)
+
+> **Segundo anclaje real-world: no disponible hoy por falta de adopción de NVD.** La validación
+> descansa en la tabla oficial de 270 entradas + invariantes (monotonicidad, interpolación) +
+> extremos 10.0/0.0.
+>
+> Marcado como **deuda, no bloqueante**. No se reabre sin una fuente nueva y confirmada. Las guías
+> que publican "worked examples" de CVSS v4.0 para CVE famosos suelen autodeclararse
+> "analyst-computed, no es documentación oficial de FIRST.org": no son anclajes válidos aunque se vean
+> confiables. Cuatro consultas a la API oficial de NVD (`docs/evidence/nvd/`) no devolvieron ninguna
+> entrada `cvssMetricV40`, así que el hueco es de adopción, no de implementación.
 
 Implementado y calculando (S42). Límites conocidos, no deuda de cálculo:
 
@@ -34,9 +44,9 @@ Implementado y calculando (S42). Límites conocidos, no deuda de cálculo:
   ignorarlas cambiaría el score en silencio. Si un programa exige vectores ambientales, hay que
   portarlas.
 - **Cobertura de vectores publicados**: los anclajes son los que fija la especificación (0.0 sin
-  impacto, 10.0 máximo) más el vector base de Log4Shell (9.3) y las invariantes del algoritmo. No hay
-  una batería de 10 scores publicados de CVE: el host no consulta NVD (S1). Si hace falta más
-  cobertura, la vía es que el humano aporte vectores con su score publicado.
+  impacto, 10.0 máximo) más el vector base de Log4Shell (9.3) y las invariantes del algoritmo. Un
+  segundo anclaje de CVE real **no está disponible** (ver el recuadro de arriba): deuda cerrada por
+  decisión, no pendiente de trabajo.
 
 ## 5. Atafetas de test en la extensión (S43, cerrado en lo mecánico por S47)
 

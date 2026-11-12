@@ -9,6 +9,11 @@
  *      interpolation code without inventing numbers.
  *
  * The lookup table itself is vendored from FIRST's reference calculator (see docs/prior-art.md).
+ *
+ * There is deliberately no second published CVE anchor: NVD's official API returned no
+ * `cvssMetricV40` for the four CVEs we checked (docs/evidence/nvd/), and unofficial "worked example"
+ * guides are not valid anchors. See docs/DEUDA.md §4: closed as debt, not reopened without a new
+ * confirmed source.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";

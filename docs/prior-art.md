@@ -99,6 +99,18 @@ el clon tiene **83 `SKILL.md`**, así que es el mismo repo.
 - **Qué NO adaptar**: sus skills **como archivos** (por los payloads de inyección), su CLI (no la
   necesitamos: nuestro gate es el chokepoint) y cualquier instalador.
 
+### Cierre de S49: qué confirma este hallazgo de nuestro diseño
+
+Claude-BugHunter decide "el asset está en scope" **leyendo el texto del finding**. Nosotros no:
+`bounty_finding` no puede pasar un hallazgo a `verified` porque el documento lo afirme. Solo lo hace
+cuando un **verificador independiente lo reproduce con `bounty_run`**, y `bounty_run` atraviesa el
+gate real: canonicalización del host, escaneo genérico de argv, rate limit del programa, confirmación
+de clase destructiva y evidencia encadenada.
+
+La diferencia es la que hay entre un **linter de checklist** y un **control ejecutado**. Esto es
+confirmación del diseño, no un cambio: la afirmación "está en scope" nunca es una prueba; la
+reproducción sí.
+
 ### No resueltos (necesito la URL exacta)
 
 Ninguno. Los dos que faltaban quedaron resueltos: `elementalsouls/Claude-BugHunter` existe y se

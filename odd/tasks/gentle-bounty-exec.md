@@ -599,6 +599,40 @@ decisión final de GO/NO-GO por escrito. No caragues ningún scope real hasta es
 Próximo checkpoint: cuando cierres 1 y 2, y cuando yo te confirme S43. Pará y esperá como siempre.
 ```
 
+### S54 — Cierre de S49: del gate ajeno a `bounty_finding`
+
+```
+1. S49 — una línea de cierre, no más investigación: en docs/prior-art.md, conectá explícitamente el
+   hallazgo del "7-Question Gate" de Claude-BugHunter (satisfecho por texto, no por control real) con
+   bounty_finding: un finding pasa a verified solo porque un verificador independiente lo reprodujo
+   vía bounty_run (que atraviesa el gate real), nunca porque el texto del finding lo afirme. Es
+   confirmación, no cambio de diseño.
+```
+
+### S55 — S50 cerrado como deuda declarada
+
+```
+2. S50 — CERRADO. No sigas buscando un segundo anclaje de CVE real. Las fuentes que presentan
+   "worked examples" de CVSS v4.0 para CVEs famosos son, en su mayoría, de guías no oficiales que
+   ellas mismas se etiquetan como "analyst-computed, no es documentación oficial de FIRST.org" — no
+   son anclajes válidos aunque se vean confiables. Dejá docs/gate.md (o donde corresponda) con una
+   nota: "segundo anclaje real-world: no disponible hoy por falta de adopción de NVD; la validación
+   descansa en la tabla oficial de 270 entradas + invariantes (monotonicidad, interpolación) +
+   extremos 10.0/0.0". Marcado como deuda, no bloqueante, no se reabre sin una fuente nueva y
+   confirmada.
+```
+
+### S56 — Sin unidades de código nuevas
+
+```
+3. No hay unidades nuevas de código en este mensaje. Mientras esperás mi confirmación de S43, podés
+   usar el tiempo para una pasada de limpieza si querés (DEUDA.md al día, confirmar que los 247 tests
+   siguen en verde), pero no es obligatorio.
+
+Sigo sin cargar ningún scope real. En cuanto corra la prueba manual de confirm-live.md te paso el
+resultado — con eso cerramos GO/NO-GO definitivo.
+```
+
 ## Tasks
 
 | ID | Tarea | Spec | Ruta | Commit |
@@ -1289,3 +1323,35 @@ NVD (`CVE-2021-44228`, `CVE-2024-3400`, `CVE-2023-44487`, `CVE-2024-3094`): **ni
 fecha. No se forzó ningún vector ni se inventó un score, y no se siguió barriendo.
 
 **S48 — S43 sigue pendiente del humano.** Sin cambios.
+
+### L20 — Checkpoint 7: enmiendas S54-S56 (verbatim)
+
+Nota de numeración: S51-S53 ya están usadas por el checkpoint anterior; estas se registran como
+S54-S56 sin reescribir las anteriores.
+
+```text
+Checkpoint 7 recibido. S49 CERRADO. S50 CERRADO como deuda declarada (opción c). Registrá esto como
+S51 en adelante.
+
+1. S49 — una línea de cierre, no más investigación: en docs/prior-art.md, conectá explícitamente el
+   hallazgo del "7-Question Gate" de Claude-BugHunter (satisfecho por texto, no por control real) con
+   bounty_finding: un finding pasa a verified solo porque un verificador independiente lo reprodujo
+   vía bounty_run (que atraviesa el gate real), nunca porque el texto del finding lo afirme. Es
+   confirmación, no cambio de diseño.
+
+2. S50 — CERRADO. No sigas buscando un segundo anclaje de CVE real. Las fuentes que presentan
+   "worked examples" de CVSS v4.0 para CVEs famosos son, en su mayoría, de guías no oficiales que
+   ellas mismas se etiquetan como "analyst-computed, no es documentación oficial de FIRST.org" — no
+   son anclajes válidos aunque se vean confiables. Dejá docs/gate.md (o donde corresponda) con una
+   nota: "segundo anclaje real-world: no disponible hoy por falta de adopción de NVD; la validación
+   descansa en la tabla oficial de 270 entradas + invariantes (monotonicidad, interpolación) +
+   extremos 10.0/0.0". Marcado como deuda, no bloqueante, no se reabre sin una fuente nueva y
+   confirmada.
+
+3. No hay unidades nuevas de código en este mensaje. Mientras esperás mi confirmación de S43, podés
+   usar el tiempo para una pasada de limpieza si querés (DEUDA.md al día, confirmar que los 247 tests
+   siguen en verde), pero no es obligatorio.
+
+Sigo sin cargar ningún scope real. En cuanto corra la prueba manual de confirm-live.md te paso el
+resultado — con eso cerramos GO/NO-GO definitivo.
+```
