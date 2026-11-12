@@ -11,6 +11,7 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
+import { classifyDestructive } from "../core/destructive.ts";
 import { createEvidenceStore, type EvidenceStore } from "../core/evidence.ts";
 import { createFindingsStore, type Finding, type FindingsStore } from "../core/findings.ts";
 import { gate, type DnsResolver, type GateRequest } from "../core/gate.ts";
@@ -72,19 +73,6 @@ export interface ProgramSession {
 	phase(input: { phase: BountyPhase; nextStep?: string }): Promise<ToolResult>;
 	status(): Promise<ToolResult>;
 }
-
-/** Classes that can break something: they always need an explicit human yes (S23 line 2). */
-export const DESTRUCTIVE_TECHNIQUES = new Set([
-	"dos",
-	"ddos",
-	"brute-force",
-	"bruteforce",
-	"password-spray",
-	"credential-stuffing",
-	"fuzzing-flood",
-]);
-
-const DESTRUCTIVE_ARG_TOKENS = /(^|=)(flood|spray|brute|bruteforce|--dos|rate-limit-0|no-rate-limit)/i;
 
 export function createSession(config: ProgramConfig, deps: SessionDeps): ProgramSession {
 	const now = config.now ?? (() => Date.now());
@@ -201,19 +189,30 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				};
 			}
 
-			const destructive =
-				(input.technique !== undefined && DESTRUCTIVE_TECHNIQUES.has(input.technique)) ||
-				current.limits.forbidden.some((item) => DESTRUCTIVE_TECHNIQUES.has(item) && (input.technique === item || input.args.some((arg) => arg.includes(item)))) ||
-				input.args.some((arg) => DESTRUCTIVE_ARG_TOKENS.test(arg));
+			// S35: inferred from binary name and argv, never trusted from the model's claim alone.
+			const classification = classifyDestructive({
+				tool: input.tool,
+				args: input.args,
+				technique: input.technique,
+				scopeRateRps: current.limits.rateRps,
+				forbidden: current.limits.forbidden,
+				targetPath: (() => {
+					try {
+						return new URL(input.target).pathname;
+					} catch {
+						return "";
+					}
+				})(),
+			});
 
-			if (destructive) {
+			if (classification.destructive) {
 				await status.setPending({
 					kind: "destructive",
-					detail: `${input.tool} ${input.args.join(" ")} contra ${input.target}`,
+					detail: `${input.tool} ${input.args.join(" ")} contra ${input.target} — ${classification.reason ?? "señal destructiva"}`,
 					since: "",
 				});
 				await refresh("Esperando tu OK explícito para la acción destructiva.");
-				const question = `Esto puede romper algo: ${input.tool} ${input.args.join(" ")} contra ${input.target}. ¿Lo autorizás?`;
+				const question = `Esto puede romper algo (${classification.reason ?? "clasificada como destructiva"}): ${input.tool} ${input.args.join(" ")} contra ${input.target}. ¿Lo autorizás?`;
 				const approved = await deps.confirm(question);
 				if (!approved) {
 					return {

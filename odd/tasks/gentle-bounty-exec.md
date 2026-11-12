@@ -373,6 +373,91 @@ riesgos nuevos; qué necesitas de mí.
     ADR, NO VERIFICADO, riesgos nuevos, qué necesitás de mí. Pará y esperá ahí.
 ```
 
+### S33 — Hueco del flag de archivo (enmienda)
+
+```
+1. Hueco del flag de archivo: ARREGLALO como unidad propia, antes de las pruebas de E.
+   Los valores de flags de archivo (-o, -t, -w, --config...) que parseen como URL o host se validan
+   contra el scope como cualquier otro token. Las rutas locales siguen sin validarse. Para no romper
+   usos legítimos (nuclei bajando plantillas): lista fetch_allow en config global (no en el scope),
+   por defecto github.com y raw.githubusercontent.com, editable solo por mí. URL fuera de scope y
+   fuera de fetch_allow ⇒ deniega con razón legible.
+   Tests: -t https://otro.com/x.yaml deniega; -t https://raw.githubusercontent.com/... pasa;
+   -o /tmp/out.txt pasa.
+```
+
+### S34 — La sesión principal también se restringe (enmienda)
+
+```
+2. Sesión principal (requisito previo a E). El informe describe las restricciones del hijo, no las
+   del orquestador. Verificá y reportá con qué tools corre la sesión principal que carga la
+   extensión. Si conserva bash/fetch por defecto, la línea roja #1 queda en papel. Entregá un
+   lanzador (bin/gentle-bounty) que arranque la sesión principal con las mismas restricciones que el
+   hijo: -ne -e, --no-mcp (o solo los MCP que yo apruebe), --tools = allowlist sin shell/fetch/write
+   genérico, cwd en work/<programa>/. Test determinista: inspección de la lista de tools activas de
+   la sesión principal. Si Pi no permite restringirla así, paráte y avisame con un ADR; no
+   improvises.
+```
+
+### S35 — Clasificación destructiva inferida (enmienda a S28b)
+
+```
+3. Clasificación destructiva: no depende de que el modelo la declare. El gate la infiere por nombre
+   de binario y argv (fuerza bruta/spray de credenciales, flooding, concurrencia o rate por encima
+   del rate_rps del scope, wordlists de contraseñas contra endpoints de login). La clase declarada
+   solo suma, nunca resta. Documentá las heurísticas en docs/gate.md.
+   Tests: ffuf con rate por encima del límite del scope ⇒ deniega; hydra/medusa ⇒ pausa por
+   destructivo; descubrimiento normal dentro del rate ⇒ pasa. Ante la duda, pausa: un falso positivo
+   molesta, un falso negativo cruza la línea roja #2.
+```
+
+### S36 — Verificador por código (enmienda a S19a)
+
+```
+4. Verificador por código. El runner construye el prompt del verificador y le pasa SOLO id +
+   evidencia, nunca el razonamiento de quien creó el finding. Test que lo demuestre.
+```
+
+### S37 — Presupuesto y parada de emergencia (nuevo)
+
+```
+5. Presupuesto y parada. Límites por corrida (tiempo, llamadas a tools, tokens si Pi los reporta)
+   con valores por defecto razonables y configurables. Al alcanzarlos, parar ordenadamente y
+   decirlo en status.md. Comando de parada de emergencia que mata los procesos lanzados por
+   bounty_run y deja el evidence store consistente.
+```
+
+### S38 — Fase E autorizada (enmienda a S31)
+
+```
+6. Fase E AUTORIZADA, un nivel. Pruebas negativas: las tres del checkpoint anterior más las del
+   punto 3. Se permiten llamadas al modelo SOLO con datos del lab local (S1b). Primer arranque
+   real de la extensión en Pi: autorizado como smoke con workspace vacío y prompt mínimo, bajo S1b.
+   Antes de depender de ctx.ui.confirm, comprobá su firma en la doc de Pi (solo lectura). Si no
+   existe, ADR corto con la alternativa, porque las pausas por destructivo y por reporte dependen
+   de eso. Lo que no compruebes: NO VERIFICADO.
+```
+
+### S39 — Legibilidad (enmienda a S29)
+
+```
+7. Legibilidad:
+   a) docs/USO.md en español llano, 1-2 páginas: cómo arrancar una sesión, qué tres pausas me vas a
+      pedir y cómo se ven, cómo leer status.md, cómo parar todo, y qué NO hacer (condición de uso).
+   b) En el informe del checkpoint, incluí un status.md real generado durante una corrida en el lab
+      (uno por fase) para que yo juzgue si se entiende.
+```
+
+### S40 — Aplazados y próximo checkpoint (enmienda a S32)
+
+```
+8. Aplazado, no bloqueante: wildcard sin puerto, IP privada/pinning (salvo que el lab lo necesite),
+   Fase F en huecos bajo S21a.
+9. Próximo checkpoint: tras E, mismo formato. Al final, checklist go/no-go para apuntar a un
+   programa real: qué está verificado, qué no, y qué harías antes de cargar el primer scope real.
+   Pará y esperá.
+```
+
 ## Tasks
 
 | ID | Tarea | Spec | Ruta | Commit |
@@ -722,3 +807,69 @@ NO VERIFICADO: la extensión dentro de una sesión real de Pi; la combinación r
 `--mode json --no-mcp -ne -e` en un `pi` hijo; la firma de `ctx.ui.confirm`; `resolveCname` con
 cadenas; IP privada/metadata y pinning anti-TOCTOU (S27d, aplazados). El smoke real
 (`npm run test:live`) está escrito y **no se ejecutó**.
+
+### L10 — Checkpoint 3 aprobado, enmiendas S33-S40 (verbatim, sin el eco del todo list)
+
+Nota de numeración: el pedido dice "Regístralas como S30 en adelante", pero S30-S32 ya están usadas
+por el checkpoint 2 (Fase D autorizada, Fase E, próximo checkpoint). Se registran como S33-S40 para
+no reescribir specs ya citadas por tests y commits.
+
+```text
+Checkpoint 3 APROBADO con enmiendas. Registralas como S30 en adelante, citando este mensaje
+literalmente. Principio de siempre: dos líneas rojas (nada fuera de scope; nada de fuerza
+bruta/DoS/destructivo sin confirmación). Todo lo demás prioriza autonomía.
+
+1. Hueco del flag de archivo: ARREGLALO como unidad propia, antes de las pruebas de E.
+   Los valores de flags de archivo (-o, -t, -w, --config...) que parseen como URL o host se validan
+   contra el scope como cualquier otro token. Las rutas locales siguen sin validarse. Para no romper
+   usos legítimos (nuclei bajando plantillas): lista fetch_allow en config global (no en el scope),
+   por defecto github.com y raw.githubusercontent.com, editable solo por mí. URL fuera de scope y
+   fuera de fetch_allow ⇒ deniega con razón legible.
+   Tests: -t https://otro.com/x.yaml deniega; -t https://raw.githubusercontent.com/... pasa;
+   -o /tmp/out.txt pasa.
+
+2. Sesión principal (requisito previo a E). El informe describe las restricciones del hijo, no las
+   del orquestador. Verificá y reportá con qué tools corre la sesión principal que carga la
+   extensión. Si conserva bash/fetch por defecto, la línea roja #1 queda en papel. Entregá un
+   lanzador (bin/gentle-bounty) que arranque la sesión principal con las mismas restricciones que el
+   hijo: -ne -e, --no-mcp (o solo los MCP que yo apruebe), --tools = allowlist sin shell/fetch/write
+   genérico, cwd en work/<programa>/. Test determinista: inspección de la lista de tools activas de
+   la sesión principal. Si Pi no permite restringirla así, paráte y avisame con un ADR; no
+   improvises.
+
+3. Clasificación destructiva: no depende de que el modelo la declare. El gate la infiere por nombre
+   de binario y argv (fuerza bruta/spray de credenciales, flooding, concurrencia o rate por encima
+   del rate_rps del scope, wordlists de contraseñas contra endpoints de login). La clase declarada
+   solo suma, nunca resta. Documentá las heurísticas en docs/gate.md.
+   Tests: ffuf con rate por encima del límite del scope ⇒ deniega; hydra/medusa ⇒ pausa por
+   destructivo; descubrimiento normal dentro del rate ⇒ pasa. Ante la duda, pausa: un falso positivo
+   molesta, un falso negativo cruza la línea roja #2.
+
+4. Verificador por código. El runner construye el prompt del verificador y le pasa SOLO id +
+   evidencia, nunca el razonamiento de quien creó el finding. Test que lo demuestre.
+
+5. Presupuesto y parada. Límites por corrida (tiempo, llamadas a tools, tokens si Pi los reporta)
+   con valores por defecto razonables y configurables. Al alcanzarlos, parar ordenadamente y
+   decirlo en status.md. Comando de parada de emergencia que mata los procesos lanzados por
+   bounty_run y deja el evidence store consistente.
+
+6. Fase E AUTORIZADA, un nivel. Pruebas negativas: las tres del checkpoint anterior más las del
+   punto 3. Se permiten llamadas al modelo SOLO con datos del lab local (S1b). Primer arranque
+   real de la extensión en Pi: autorizado como smoke con workspace vacío y prompt mínimo, bajo S1b.
+   Antes de depender de ctx.ui.confirm, comprobá su firma en la doc de Pi (solo lectura). Si no
+   existe, ADR corto con la alternativa, porque las pausas por destructivo y por reporte dependen
+   de eso. Lo que no compruebes: NO VERIFICADO.
+
+7. Legibilidad:
+   a) docs/USO.md en español llano, 1-2 páginas: cómo arrancar una sesión, qué tres pausas me vas a
+      pedir y cómo se ven, cómo leer status.md, cómo parar todo, y qué NO hacer (condición de uso).
+   b) En el informe del checkpoint, incluí un status.md real generado durante una corrida en el lab
+      (uno por fase) para que yo juzgue si se entiende.
+
+8. Aplazado, no bloqueante: wildcard sin puerto, IP privada/pinning (salvo que el lab lo necesite),
+   Fase F en huecos bajo S21a.
+
+9. Próximo checkpoint: tras E, mismo formato. Al final, checklist go/no-go para apuntar a un
+   programa real: qué está verificado, qué no, y qué harías antes de cargar el primer scope real.
+   Pará y esperá.
+```
