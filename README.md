@@ -15,6 +15,20 @@ Todo lo demás prioriza autonomía y fricción mínima.
 
 ## Cómo se usa
 
+Arrancá la sesión con el lanzador, no con `pi` a mano: es el que aplica la allowlist de la sesión
+principal (`--no-mcp`, `-ne`, `--tools` sin bash/fetch/write).
+
+```bash
+bin/gentle-bounty acme            # sesión restringida, cwd en work/acme/
+bin/gentle-bounty acme --check    # muestra el argv exacto y no lanza nada
+```
+
+Para parar todo: `bounty_stop { program: "acme" }`. Mata los procesos de `bounty_run`, anota la
+parada en la cadena de evidencia y verifica que siga consistente.
+
+Guía de uso en castellano llano: `docs/USO.md`. Ejemplos reales de `status.md` por fase (generados
+por `scripts/vertical-slice.ts` contra el lab local): `docs/samples/`.
+
 ```bash
 # 1. Scope del programa (lo escribe el humano, no el agente)
 work/acme/scope.yaml

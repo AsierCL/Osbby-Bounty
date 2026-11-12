@@ -47,6 +47,36 @@ lineal del programa.
 
 **Estado: aplazada.** No bloquea fases D ni E. Se corrige cuando convenga.
 
+## Clasificación destructiva: inferida, no declarada (S35)
+
+La clase que declara el modelo **solo suma**. El gate la infiere del binario y del argv:
+
+| Señal | Fuerza | Ejemplo |
+|---|---|---|
+| Binario de fuerza bruta | fuerte | `hydra`, `medusa`, `ncrack`, `patator`, `crowbar`, `legba`, `john`, `hashcat` |
+| Flag de flooding | fuerte | `--flood`, `-dos`, `--rate-limit 0` |
+| Rate explícito por encima del `rate_rps` del programa | fuerte | `ffuf -rate 200` con `rate_rps: 5` |
+| Rate explícito sin rate declarado en el programa | fuerte | `-rate 20` con scope sin `rate_rps` |
+| Tags intrusivos de nuclei | fuerte | `-tags cve,dos` |
+| Wordlist de contraseñas contra login/sesión | fuerte | `rockyou.txt` contra `/login` |
+| Clase destructiva declarada o en `forbidden` | fuerte | `technique: "dos"` |
+| Wordlist con pinta de contraseñas en otro lado | débil | `-w pw-list.txt` contra `/static` |
+| Concurrencia alta | débil | `-c 50` |
+| Target es login/sesión | débil | `/api/login` |
+
+Fuerte ⇒ pausa y pide confirmación. Dos débiles juntas ⇒ también. Ante la duda, pausa: un falso
+positivo cuesta una confirmación, un falso negativo cruza la línea roja #2.
+
+## Flags de archivo: rutas locales vs descargas (S33)
+
+El valor de un flag de archivo (`-o`, `-t`, `-w`, `--config`, `-P`, `-L`, …) es una **ruta local** y
+no se valida, salvo que tenga esquema (`https://…`): en ese caso la tool lo va a **descargar**, o sea
+es tráfico de red, y se valida contra el scope. Si no está en el scope pero sí en `fetch_allow`
+(config global del operador, no del programa), pasa; si no, se deniega con motivo.
+
+`-l` es siempre lista de hosts. Una tool que use `-l` para otra cosa se va a negar (falla cerrado),
+no se va a ejecutar sin validar.
+
 ## Semántica de las reglas
 
 | Regla | Matchea | No matchea |

@@ -873,3 +873,36 @@ bruta/DoS/destructivo sin confirmación). Todo lo demás prioriza autonomía.
    programa real: qué está verificado, qué no, y qué harías antes de cargar el primer scope real.
    Pará y esperá.
 ```
+
+### L11 — Cierre de Fase E (checkpoint 4)
+
+Unidades cerradas, cada una con tests:
+
+- **S33** `src/core/fetch-allow.ts` + `src/core/config.ts` + gate: valores de flags de archivo con
+  esquema se validan contra scope y `fetch_allow`; rutas locales siguen libres. 11 tests.
+- **S34** `bin/gentle-bounty.mjs` + `scripts/tools-probe.ts`: la sesión principal arranca con
+  `--no-mcp -ne -e --tools <allowlist>` y cwd en `work/<programa>/`. `--check` imprime el argv sin
+  lanzar nada. 5 tests. `ctx.ui.confirm(title, message)` **verificado** en `docs/extensions.md:84` y
+  `:197`, así que no hace falta ADR de alternativa.
+- **S35** `src/core/destructive.ts`: clasificación inferida (binario, flooding, rate sobre el
+  programa, concurrencia, wordlists de contraseñas, tags intrusivos); lo declarado solo suma. 11
+  tests + integración en sesión.
+- **S36** `src/pi/verifier.ts`: la tarea del verificador se arma con id + evidencia de artefacto;
+  título, notas, confianza y razones son estructuralmente inalcanzables. 5 tests.
+- **S37** `src/pi/budget.ts` + `src/pi/stop.ts`: techo por corrida y parada de emergencia que mata
+  los hijos y deja la cadena verificable. 8 tests.
+- **S38** `lab/` + `scripts/vertical-slice.ts` + `tests/phase-e.test.ts`: siete fases contra el lab
+  local, cinco pruebas negativas verdes.
+- **S39** `docs/USO.md` + `docs/samples/status-*.md` (siete, uno por fase).
+- **S40** la Fase F queda en huecos bajo S21a.
+
+Estado: **221 tests, 0 fallos**. Tests del repo: `npm test`.
+
+Desviación declarada: **el calculador de CVSS v4.0 no está implementado**. `src/core/report.ts`
+valida la forma del vector y transporta el score; el cálculo numérico según la especificación
+oficial (C7/S14) queda como unidad pendiente, no simulada.
+
+NO VERIFICADO: el arranque real de la extensión dentro de una sesión de Pi (el smoke `test:live`
+está escrito y no se ejecutó); el comportamiento de `--tools`/`-ne`/`-e` en un `pi` real; que
+`resolveCname` se comporte como asumimos. Todo lo demás de esta fase se verificó con tests
+deterministas contra el lab local.
