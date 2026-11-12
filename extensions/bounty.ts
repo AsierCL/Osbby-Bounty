@@ -136,6 +136,7 @@ export default function bountyExtension(pi: PiLike): void {
 			{
 				root,
 				program,
+				...(process.env.GENTLE_BOUNTY_SESSION_ID === undefined ? {} : { sessionId: process.env.GENTLE_BOUNTY_SESSION_ID }),
 				redaction: config?.redaction ?? redactionMode(),
 				budget: config?.budget,
 			},

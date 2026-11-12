@@ -1743,3 +1743,42 @@ B5. GENTLE_BOUNTY_VERIFIER: bin/gentle-bounty la elimina del entorno de la sesi�
 
 Informá la parte A con el formato habitual y pará.
 ```
+
+### L25 — Parte B cerrada (S73+): 13 tareas y el flujo vivo
+
+Todas las tareas de la Parte B, en el orden pedido:
+
+1. `94d1268` pasado a main (`git cherry-pick -x`): solo `docs/evidence/` + `.gitignore`; 282 tests verdes.
+2. `docs/evidence/s43-live-run.md` con R6-R9, el log archivado cruzado registro por registro,
+   **S43 (ii) VERIFICADO**, el falso positivo seq 5 explicado, **S43 (iii) PENDIENTE**. `docs/DEUDA.md`
+   actualizada y `docs/GO-NO-GO.md` creado.
+3. **B2**: `setPending(null)` ahora va seguido de `refresh()` en las dos ramas, y queda un evento
+   fechado ("confirmaste/denegaste a las HH:MM"). Tests que releen `status.md` del disco y `state.json`.
+4. **B3**: `bounty_run` devuelve "destructiva confirmada por el humano (HH:MM)" / "denegada por el
+   humano" / "sin UI: no confirmada". `SessionDeps.confirm` pasó a opcional para poder distinguir
+   "sin UI" de "denegado".
+5. **B4**: diálogo por `ctx.ui.select` con "No, no ejecutar" **primero** y título con clase y comando
+   completo; si solo hay `confirm`, el texto lleva la misma información y lo más importante (el "No").
+6. **B1**: `tool_path` en `.bounty/config.json` se antepone al PATH del hijo; el modelo no influye en
+   el entorno. El kit lo escribe y el cleanup lo revierte. Test con el binario fuera del PATH.
+7. **R9/7a-7d**: registros `gate` (bloqueo, clase prohibida) y `confirmation` (requested/granted/
+   denied/unavailable) escritos por código; whitelist de kinds para el modelo
+   (`observation`, `recon-note`, `erratum`), `erratum` exige `refSeq` existente y se muestra junto a
+   él; `protocol.md` con la regla de no declarar incidentes; criterio (iii) en el kit y su test.
+8. **D2**: `parseEvents` lee `message_end`/`agent_end` con `message.content[].text`; el veredicto del
+   hijo ya llega.
+9. **D1**: veredicto estructurado del verificador y aplicación por código, validando que la cadena
+   tenga una `execution` de la sesión del verificador contra el endpoint del hallazgo.
+   `GENTLE_BOUNTY_VERIFIER` eliminada; `bounty_finding` fuera de la allowlist del verificador.
+10. **D3**: `bounty_verify(id)` lanza el verificador por el runner y devuelve el veredicto aplicado.
+    Runner: **297 líneas** (≤800).
+11. **Kit**: archiva la corrida anterior, escribe `tool_path`, y el escenario (iii) tiene criterio de
+    aceptación. Probado con `pi` falso; lo que no se puede probar sin diálogo real es la tecla (ya
+    atestiguada en R6).
+12. **Flujo vivo completo: VERDE.** Recon con `curl` real, finding, verificador real (81 s, allowlist
+    exacta, `REPRODUCIDO` seqs 14/16/18), `verified` aplicado por código con evidencia de la sesión del
+    verificador, y `bounty_report` escribiendo `work/lab-flow/reports/F-0001.md`. El primer intento
+    falló por un cable faltante (el hijo no adoptaba el `sessionId` del runner) y quedó registrado.
+13. Informe: este bloque + `docs/GO-NO-GO.md`.
+
+Estado: **293 tests, 0 fallos**.

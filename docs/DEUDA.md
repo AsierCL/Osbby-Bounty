@@ -20,11 +20,18 @@ sigue viendo el catálogo de skills de desarrollo (branch-pr, judgment-day, skil
 Ver la sección "Hueco conocido: wordlists" en `docs/gate.md`. Decisión pendiente: ¿se valida también
 ese valor cuando parsea como URL (`https://…`), como ya se hace con `-o`/`-t`/`-w`?
 
-## 3. Pausa destructiva: falta la tecla (S43)
+## 3. Pausa destructiva: diálogo verificado, falta el escenario (iii)
 
-El mecanismo está verificado con proceso real y con la firma documentada de `ctx.ui.confirm`; lo que
-falta verificar es el diálogo de Pi y la tecla del humano. Detalle, intentos fallidos y procedimiento
-manual: `docs/evidence/confirm-live.md`.
+**S43 (ii) VERIFICADO** en vivo por el operador: diálogo real de Pi, tecla humana, ambas ramas (NO y
+SÍ). Ver `docs/evidence/s43-live-run.md` (R6).
+
+Queda **S43 (iii)**: intentar salir de scope en una sesión viva y ver el mensaje exacto del gate en
+`status.md`. El gate está cubierto por tests y por el criterio nuevo del kit, pero no lo vio un humano
+en pantalla.
+
+Nota de la corrida: el "incidente" seq 5 de `work/lab-s43-archivo` es un **falso positivo** que quedó
+permanente en una cadena que no admite borrado. No se toca: es archivo. Lo que cambió es que ya no
+puede volver a pasar (registros de sistema + whitelist de kinds + `erratum` con `refSeq`).
 
 ## 4. CVSS v4.0: cerrado, con dos límites (S55: no se reabre sin fuente nueva)
 
@@ -101,3 +108,12 @@ Documentado acá, **sin implementar**, como pidió S58. Si algún día se implem
 El preflight avisa: en este host `/usr/bin/httpx` es el **cliente HTTP de Python**, no la herramienta
 de Project Discovery. Si algún día se usa `httpx` como binario de recon, hay que verificar cuál está
 primero en el PATH. Hoy el flujo del lab usa `curl`, así que no afecta.
+
+## 9. El verificador firmaba con otro id (encontrado por el flujo vivo)
+
+El primer intento del flujo completo falló en el paso de aplicación: el veredicto era correcto
+(`REPRODUCIDO`, con dos ejecuciones reales) pero el código lo rechazó porque la sesión del hijo no
+adoptaba el `GENTLE_BOUNTY_SESSION_ID` que genera el runner, así que sus registros de `execution`
+llevaban otro id. Corregido en `extensions/bounty.ts`; el segundo intento aplicó el veredicto.
+**Deuda**: no hay test unitario de ese cable (solo el flujo vivo lo demostró), porque requiere un
+`pi` real. Se cubre con el flujo cuando corra de nuevo.
