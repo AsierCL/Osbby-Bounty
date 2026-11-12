@@ -77,6 +77,28 @@ es tráfico de red, y se valida contra el scope. Si no está en el scope pero s�
 `-l` es siempre lista de hosts. Una tool que use `-l` para otra cosa se va a negar (falla cerrado),
 no se va a ejecutar sin validar.
 
+## Hueco conocido: valores de wordlist (S44, documentado, no arreglado)
+
+Los flags de wordlist (`-P`, `-L`, `-w`, `--passwords`, `--login-list`, `--wordlist`) están en la
+lista de **valor = ruta local**, así que su valor **no se valida**. Es necesario para que
+`-P passwords.txt` no se confunda con un host (`passwords.txt` parsea como hostname).
+
+Consecuencia, con el mismo nivel de detalle que el hueco de `-o`/`-t` ya cerrado:
+
+| Caso | Qué pasa hoy | Qué debería pasar |
+|---|---|---|
+| `-P /tmp/words.txt` | pasa, es ruta local | igual: no es un host |
+| `-P https://otro.com/words.txt` | **pasa sin validar** | debería validarse como descarga, igual que `-t https://otro.com/x.yaml` (S33) |
+| `-w http://192.0.2.1/list.txt` | **pasa sin validar** | idem: es tráfico de red con esquema |
+| `-L otro.com` (sin esquema) | pasa como ruta local | discutible: un host sin esquema en un flag de archivo |
+
+El arreglo natural es extender a los flags de wordlist la misma regla de S33: si el valor tiene
+esquema, es descarga y se valida (scope primero, después `fetch_allow`). No está implementado.
+
+Riesgo real: **bajo pero no nulo**. Requiere que una tool descargue una wordlist desde una URL con
+esquema sin que nadie lo note. Está acá, junto al otro hueco, para que se lea con la misma
+gravedad y no como nota de informe.
+
 ## Semántica de las reglas
 
 | Regla | Matchea | No matchea |

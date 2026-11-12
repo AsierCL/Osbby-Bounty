@@ -458,6 +458,61 @@ riesgos nuevos; qué necesitas de mí.
    Pará y esperá.
 ```
 
+### S41 — Verificación del subagente hijo (enmienda)
+
+```
+1. Verificación del subagente hijo (el más importante de los tres). Mismo patrón que usaste para
+   la sesión principal: corré un subagente real (no el pi falso) contra el lab, capturá su
+   toolsAdded/agent_end, y compará contra la allowlist declarada en su asset. Guardá la evidencia
+   en docs/evidence/ igual que hiciste con la sesión principal. Si hay una sola tool de más
+   (bash, fetch, write, lo que sea), es un hallazgo crítico: pará y avisame antes de seguir, no lo
+   arregles y sigas de largo sin que yo lo vea.
+```
+
+### S42 — CVSS v4.0 real (enmienda a C7)
+
+```
+2. CVSS v4.0 real. Implementá el cálculo según la especificación oficial (no solo validación de
+   forma). Tests contra vectores de referencia conocidos (al menos 5-10 casos con score esperado
+   publicado). report.ts deja de transportar un score puesto a mano; lo calcula.
+```
+
+### S43 — Pausa destructiva en vivo (enmienda a S38)
+
+```
+3. ctx.ui.confirm en vivo. Una pausa destructiva real en el lab: una vez respondida que no
+   (verificá que no ejecuta nada) y una vez que sí (verificá que ejecuta). Esto es gatillo de tu
+   línea roja #2, necesita haber corrido de verdad, no solo estar documentado.
+```
+
+### S44 — Hueco de wordlists documentado (enmienda a S35)
+
+```
+4. Documentá (sin arreglar todavía) el hueco de -P/-L/-w que mencionaste en riesgos: un host en
+   valor de wordlist no se valida. Mismo nivel de detalle que diste para el hueco de -o/-t/-w ya
+   cerrado, en docs/gate.md, para que quede igual de visible. No es bloqueante, pero no quiero que
+   quede como nota suelta en un informe de checkpoint.
+```
+
+### S45 — Fase F en paralelo (enmienda a S21b)
+
+```
+5. Fase F: podés empezarla en huecos desde ahora, bajo S21a, en paralelo a los puntos 1-4.
+```
+
+### S46 — Deuda de skills y cierre del checkpoint
+
+```
+6. Las skills de gentle-pi contaminando el contexto (punto 3 de tu checklist): queda pospuesto,
+   no es bloqueante para ir a programa real. Anotalo como deuda.
+
+Cuando 1, 2 y 3 estén verdes: mandame el checklist go/no-go actualizado. Si los tres cierran sin
+sorpresas, mi decisión por adelantado es GO para cargar el primer programa real — pero quiero
+verlo con la evidencia del punto 1 en la mano antes de confirmarlo, no solo "tests en verde".
+
+Próximo checkpoint: tras cerrar 1-3. Mismo formato de informe. Pará y esperá ahí.
+```
+
 ## Tasks
 
 | ID | Tarea | Spec | Ruta | Commit |
@@ -931,3 +986,44 @@ Observación nueva: con `-ne` las **skills** del paquete `gentle-pi` siguen carg
 paquete, no extensiones). Las tools están restringidas; el contexto de prompt no se limpia.
 
 Estado final de la fase: **221 tests, 0 fallos**.
+
+### L13 — Checkpoint 4 aprobado, enmiendas S41-S46 (verbatim, sin el eco del todo list)
+
+Nota: el pedido dice "Registrá esto como S41 en adelante", y S41-S46 es exactamente lo que sigue a
+S40. Registradas con ese número.
+
+```text
+Checkpoint 4 APROBADO. NO-GO para programa real todavía — cerrar 3 puntos primero. Registrá esto
+como S41 en adelante, citando este mensaje literalmente.
+
+1. Verificación del subagente hijo (el más importante de los tres). Mismo patrón que usaste para
+   la sesión principal: corré un subagente real (no el pi falso) contra el lab, capturá su
+   toolsAdded/agent_end, y compará contra la allowlist declarada en su asset. Guardá la evidencia
+   en docs/evidence/ igual que hiciste con la sesión principal. Si hay una sola tool de más
+   (bash, fetch, write, lo que sea), es un hallazgo crítico: pará y avisame antes de seguir, no lo
+   arregles y sigas de largo sin que yo lo vea.
+
+2. CVSS v4.0 real. Implementá el cálculo según la especificación oficial (no solo validación de
+   forma). Tests contra vectores de referencia conocidos (al menos 5-10 casos con score esperado
+   publicado). report.ts deja de transportar un score puesto a mano; lo calcula.
+
+3. ctx.ui.confirm en vivo. Una pausa destructiva real en el lab: una vez respondida que no
+   (verificá que no ejecuta nada) y una vez que sí (verificá que ejecuta). Esto es gatillo de tu
+   línea roja #2, necesita haber corrido de verdad, no solo estar documentado.
+
+4. Documentá (sin arreglar todavía) el hueco de -P/-L/-w que mencionaste en riesgos: un host en
+   valor de wordlist no se valida. Mismo nivel de detalle que diste para el hueco de -o/-t/-w ya
+   cerrado, en docs/gate.md, para que quede igual de visible. No es bloqueante, pero no quiero que
+   quede como nota suelta en un informe de checkpoint.
+
+5. Fase F: podés empezarla en huecos desde ahora, bajo S21a, en paralelo a los puntos 1-4.
+
+6. Las skills de gentle-pi contaminando el contexto (punto 3 de tu checklist): queda pospuesto,
+   no es bloqueante para ir a programa real. Anotalo como deuda.
+
+Cuando 1, 2 y 3 estén verdes: mandame el checklist go/no-go actualizado. Si los tres cierran sin
+sorpresas, mi decisión por adelantado es GO para cargar el primer programa real — pero quiero
+verlo con la evidencia del punto 1 en la mano antes de confirmarlo, no solo "tests en verde".
+
+Próximo checkpoint: tras cerrar 1-3. Mismo formato de informe. Pará y esperá ahí.
+```

@@ -15,6 +15,7 @@ import { isIP } from "node:net";
 
 import { createSession, type ProgramSession, type ToolExecution } from "../src/pi/session.ts";
 import { loadGlobalConfig, type GlobalConfig } from "../src/core/config.ts";
+import { resolveConfirm } from "../src/pi/confirm.ts";
 import type { BountyPhase } from "../src/core/status.ts";
 import type { RedactionMode } from "../src/core/redact.ts";
 
@@ -102,7 +103,7 @@ export default function bountyExtension(pi: PiLike): void {
 		}
 	}
 
-	function sessionFor(program: string): ProgramSession {
+	async function sessionFor(program: string): Promise<ProgramSession> {
 		const existing = sessions.get(program);
 		if (existing) return existing;
 		const created = createSession(
@@ -116,6 +117,13 @@ export default function bountyExtension(pi: PiLike): void {
 			},
 		);
 		sessions.set(program, created);
+		// Test affordance (S43), gated by the same two-key opt-in as the confirmation stub: preload the
+		// scope so a live run can exercise bounty_run without depending on the model doing two calls.
+		const preload = process.env.GENTLE_BOUNTY_PRELOAD_SCOPE;
+		if (preload && process.env.GENTLE_BOUNTY_ALLOW_CONFIRM_STUB === "1") {
+			// Awaited: a fire-and-forget preload lost the race against the first tool call.
+			await created.scope({ file: preload, confirm: true });
+		}
 		return created;
 	}
 
@@ -135,7 +143,7 @@ export default function bountyExtension(pi: PiLike): void {
 			required: ["program", "file"],
 		} as never,
 		async execute(_toolCallId, params) {
-			const session = sessionFor(String(params.program));
+			const session = await sessionFor(String(params.program));
 			const result = await session.scope({ file: String(params.file), confirm: params.confirm === true });
 			return text(result.text, { ok: result.ok });
 		},
@@ -161,13 +169,16 @@ export default function bountyExtension(pi: PiLike): void {
 			required: ["program", "tool", "args", "target"],
 		} as never,
 		async execute(_toolCallId, params, _signal, _onUpdate, context) {
-			const session = sessionFor(String(params.program));
+			const session = await sessionFor(String(params.program));
 			// Verified in docs/extensions.md:84 and :197 — `await ctx.ui.confirm(title, message)`.
-			const confirm = async (question: string): Promise<boolean> => {
-				const ui = context?.ui;
-				if (typeof ui?.confirm !== "function") return false;
-				return Boolean(await ui.confirm("Confirmar acción destructiva", question));
-			};
+			const ui = context?.ui;
+			const resolved = resolveConfirm({
+				uiConfirm:
+					typeof ui?.confirm === "function"
+						? async (question: string) => Boolean(await ui.confirm("Confirmar acción destructiva", question))
+						: undefined,
+			});
+			const confirm = resolved.confirm;
 			const result = await session.run({
 				tool: String(params.tool),
 				args: Array.isArray(params.args) ? params.args.map(String) : [],
@@ -197,7 +208,7 @@ export default function bountyExtension(pi: PiLike): void {
 			required: ["program", "action"],
 		} as never,
 		async execute(_toolCallId, params) {
-			const session = sessionFor(String(params.program));
+			const session = await sessionFor(String(params.program));
 			const result = await session.evidence({
 				action: params.action as "append" | "list" | "verify",
 				...(params.kind === undefined ? {} : { kind: String(params.kind) }),
@@ -230,7 +241,7 @@ export default function bountyExtension(pi: PiLike): void {
 			required: ["program", "action"],
 		} as never,
 		async execute(_toolCallId, params) {
-			const session = sessionFor(String(params.program));
+			const session = await sessionFor(String(params.program));
 			const result = await session.finding({
 				action: params.action as "create" | "update" | "list",
 				...(params.id === undefined ? {} : { id: String(params.id) }),
@@ -265,7 +276,7 @@ export default function bountyExtension(pi: PiLike): void {
 			required: ["program", "phase"],
 		} as never,
 		async execute(_toolCallId, params) {
-			const session = sessionFor(String(params.program));
+			const session = await sessionFor(String(params.program));
 			const result = await session.phase({
 				phase: params.phase as BountyPhase,
 				...(params.next_step === undefined ? {} : { nextStep: String(params.next_step) }),
@@ -301,7 +312,7 @@ export default function bountyExtension(pi: PiLike): void {
 			required: ["program"],
 		} as never,
 		async execute(_toolCallId, params) {
-			const result = await sessionFor(String(params.program)).status();
+			const result = await (await sessionFor(String(params.program))).status();
 			return text(result.text, { ok: result.ok });
 		},
 	});

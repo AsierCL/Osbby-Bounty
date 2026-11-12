@@ -147,6 +147,27 @@ function parseEvents(stdout: string): { output: string; toolCalls: ReportedToolC
 			activeTools = list.filter((item): item is string => typeof item === "string");
 			continue;
 		}
+		if (type === "agent_end") {
+			// Real Pi reports the enabled tools here, in a system message with `toolsAdded`. This is the
+			// authoritative list (S19a/S41): the child's self-description in prose is not.
+			const messages = Array.isArray(record.messages) ? record.messages : [];
+			const names: string[] = [];
+			for (const message of messages) {
+				if (typeof message !== "object" || message === null) continue;
+				const entry = message as Record<string, unknown>;
+				if (entry.role !== "system") continue;
+				const added = Array.isArray(entry.toolsAdded) ? entry.toolsAdded : [];
+				for (const tool of added) {
+					if (typeof tool === "object" && tool !== null && typeof (tool as { name?: unknown }).name === "string") {
+						names.push((tool as { name: string }).name);
+					} else if (typeof tool === "string") {
+						names.push(tool);
+					}
+				}
+			}
+			if (names.length > 0) activeTools = names;
+			continue;
+		}
 		if (type === "tool_call" || type === "tool" || type === "tool_use") {
 			const name = typeof record.name === "string" ? record.name : typeof record.toolName === "string" ? record.toolName : null;
 			if (name) toolCalls.push({ name });
