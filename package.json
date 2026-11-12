@@ -10,6 +10,19 @@
 	},
 	"scripts": {
 		"test": "node --experimental-strip-types --test \"tests/**/*.test.ts\"",
-		"test:one": "node --experimental-strip-types --test"
-	}
+		"test:one": "node --experimental-strip-types --test",
+		"test:live": "node --experimental-strip-types scripts/smoke-live.mjs"
+	},
+	"pi": {
+		"extensions": [
+			"./extensions"
+		]
+	},
+	"files": [
+		"assets/",
+		"docs/",
+		"extensions/",
+		"scripts/",
+		"src/"
+	]
 }
