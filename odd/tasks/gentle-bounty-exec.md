@@ -906,3 +906,28 @@ NO VERIFICADO: el arranque real de la extensión dentro de una sesión de Pi (el
 está escrito y no se ejecutó); el comportamiento de `--tools`/`-ne`/`-e` en un `pi` real; que
 `resolveCname` se comporte como asumimos. Todo lo demás de esta fase se verificó con tests
 deterministas contra el lab local.
+
+### L12 — Smoke real de la sesión principal (S34) y cierre
+
+Corrida real autorizada por S38: `bin/gentle-bounty smoke --probe scripts/tools-probe.ts -- --mode json
+"Responde solamente: ok"`, workspace vacío, prompt mínimo, 3.603 tokens (USD 0.00054).
+
+**Verificado leyendo el evento `agent_end` de Pi**, no preguntándole al modelo:
+
+```json
+["read","grep","find","ls","bounty_scope","bounty_run","bounty_evidence",
+ "bounty_finding","bounty_phase","bounty_status","bounty_stop"]
+```
+
+Sin `bash`, sin `write`, sin `edit`, sin `fetch`, sin `web_search`. Las siete tools de bounty
+registradas. cwd de la sesión: `work/smoke`. Evidencia en `docs/evidence/main-session-tools.md`.
+
+Incidente propio, registrado: el lanzador apuntaba `GENTLE_BOUNTY_PROBE_FILE` al propio archivo de la
+extensión de sondeo, así que el sondeo **sobrescribió su fuente** durante el smoke. Restaurado el
+archivo, la salida ahora vive en `work/<programa>/probe-tools.json`, el lanzador se niega a usar la
+misma ruta y el test del lanzador verifica la separación.
+
+Observación nueva: con `-ne` las **skills** del paquete `gentle-pi` siguen cargando (son recursos del
+paquete, no extensiones). Las tools están restringidas; el contexto de prompt no se limpia.
+
+Estado final de la fase: **221 tests, 0 fallos**.
