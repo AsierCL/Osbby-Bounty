@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createSession, type ProgramSession, type SessionDeps } from "../src/pi/session.ts";
+import { verifyFinding } from "./helpers/verifier-flow.ts";
 
 const SCOPE_NO_FORBIDDEN = `program: lab
 lab: true
@@ -149,11 +150,15 @@ test("a destructive action always asks, and does nothing when the answer is no",
 			technique: "dos",
 		});
 		assert.equal(result.ok, false);
-		assert.match(result.text, /acción de clase destructiva/);
+		assert.match(result.text, /Acción destructiva denegada por el humano a las \d{2}:\d{2}/);
 		assert.equal(h.confirmations.length, 1);
 		assert.equal(h.executed.length, 0);
 		const text = await statusText(h);
-		assert.match(text, /destructiva necesita tu OK explícito/);
+		// B2: dated event in the file, and state.json has no pending item left.
+		assert.match(text, /Última acción destructiva: denegaste a las \d{2}:\d{2}/);
+		const state = JSON.parse(await readFile(join(h.dir, "work", "lab", "state.json"), "utf8"));
+		assert.equal(state.pending, null);
+		assert.equal(state.lastConfirmation.outcome, "denied");
 	} finally {
 		await h.cleanup();
 	}
@@ -249,18 +254,9 @@ test("findings flow through the lifecycle and rewrite status.md", async () => {
 		assert.match(created.text, /F-0001/);
 		const duplicate = await h.session.finding({ action: "create", title: "otra vez", class: "idor", endpoint: "/api/v1/invoices/1234" });
 		assert.match(duplicate.text, /Ya lo tenía: F-0001/);
-		// The verifier runs in its own session (S66); here it shares the workspace.
-		const verifier = createSession(
-			{ root: h.dir, program: "lab", verifier: true },
-			{
-				dns: async () => ({ cname: [] }),
-				readFile: async (path: string) => readFile(path, "utf8"),
-				runTool: async () => ({ exitCode: 0, stdout: "ok", stderr: "" }),
-				confirm: async () => true,
-			},
-		);
-		const verified = await verifier.finding({ action: "update", id: "F-0001", state: "verified", reason: "reproducido dos veces" });
-		assert.equal(verified.ok, true, verified.text);
+		// D1: the verifier session runs its own execution and the code applies its verdict.
+		const outcome = await verifyFinding({ root: h.dir, program: "lab", findingId: "F-0001", endpoint: "/api/v1/invoices/1234", target: "http://127.0.0.1:3000/api/v1/invoices/1234", scopePath: join(h.dir, "scope.yaml") });
+		assert.equal(outcome.applied.ok, true, outcome.applied.text);
 		const text = await statusText(h);
 		assert.match(text, /F-0001\*\* IDOR en facturas — confirmado/);
 	} finally {

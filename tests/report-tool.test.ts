@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createSession, type ProgramSession } from "../src/pi/session.ts";
+import { verifyFinding } from "./helpers/verifier-flow.ts";
 import { scoreVector } from "../src/core/cvss.ts";
 
 const SCOPE = "program: lab\nlab: true\nauthorized_on: 2026-11-11\nin_scope:\n  - 127.0.0.1:3000\nlimits:\n  rate_rps: 5\n";
@@ -32,8 +33,8 @@ async function sessionWithFinding(verified: boolean): Promise<{ dir: string; ses
 	const created = await session.finding({ action: "create", title: "IDOR en facturas", class: "idor", endpoint: "/api/invoices/2", parameter: "id" });
 	const id = (created.text.match(/F-\d{4}/) ?? [])[0] ?? "";
 	if (verified) {
-		const verifier = createSession({ root: dir, program: "lab", verifier: true }, deps);
-		await verifier.finding({ action: "update", id, state: "verified", reason: "reproducido dos veces" });
+		const outcome = await verifyFinding({ root: dir, program: "lab", findingId: id, endpoint: "/api/invoices/2", target: "http://127.0.0.1:3000/api/invoices/2", scopePath: join(dir, "scope.yaml") });
+		if (!outcome.applied.ok) throw new Error(outcome.applied.text);
 	}
 	return { dir, session, id, cleanup: () => rm(dir, { recursive: true, force: true }) };
 }

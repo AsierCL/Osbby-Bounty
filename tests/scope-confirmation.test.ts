@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createSession, type ProgramSession, type SessionDeps } from "../src/pi/session.ts";
+import { verifyFinding } from "./helpers/verifier-flow.ts";
 
 const PORT = 33971;
 
@@ -224,7 +225,7 @@ test("S64: a destructive class the program does NOT forbid still pauses", async 
 			target: `http://127.0.0.1:${PORT}/login`,
 		});
 		assert.equal(result.ok, false);
-		assert.match(result.text, /clase destructiva/);
+		assert.match(result.text, /Acción destructiva denegada por el humano/);
 		assert.equal(h.questions.length, 1, "the pause must ask exactly once");
 		assert.equal(h.executed.length, 0);
 	} finally {
@@ -241,19 +242,17 @@ test("S66: a finding cannot be verified from the main session, only from a verif
 		assert.ok(id, created.text);
 		const denied = await main.session.finding({ action: "update", id, state: "verified", reason: "lo probé" });
 		assert.equal(denied.ok, false);
-		assert.match(denied.text, /verificador independiente/);
+		assert.match(denied.text, /verificador/);
 
-		const verifier = createSession(
-			{ root: main.dir, program: "lab", verifier: true },
-			{
-				dns: async () => ({ cname: [] }),
-				readFile: (path) => readFile(path, "utf8"),
-				runTool: async () => ({ exitCode: 0, stdout: "ok", stderr: "" }),
-				confirm: async () => true,
-			},
-		);
-		const accepted = await verifier.finding({ action: "update", id, state: "verified", reason: "reproducido dos veces" });
-		assert.equal(accepted.ok, true, accepted.text);
+		const accepted = await verifyFinding({
+			root: main.dir,
+			program: "lab",
+			findingId: id as string,
+			endpoint: "/api/invoices/2",
+			target: `http://127.0.0.1:${PORT}/api/invoices/2`,
+			scopePath: main.scopePath,
+		});
+		assert.equal(accepted.applied.ok, true, accepted.applied.text);
 	} finally {
 		await main.cleanup();
 	}

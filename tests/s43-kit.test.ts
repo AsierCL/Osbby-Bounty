@@ -9,6 +9,8 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { createEvidenceStore } from "../src/core/evidence.ts";
+import { createSession } from "../src/pi/session.ts";
 import { gate } from "../src/core/gate.ts";
 import { parseScope } from "../src/core/scope.ts";
 
@@ -82,15 +84,43 @@ test("the out-of-scope command of the kit is denied by the real gate, with a rea
 	}
 });
 
-test("the kit prints the launch command with MOSH and the marked PATH, and the marker is harmless", async () => {
+test("the kit prints the MOSH launch command, writes tool_path, and the marker is harmless", async () => {
 	const kit = await prepare();
 	try {
 		assert.match(kit.output, /MOSH_CONNECTION=orca/);
-		assert.match(kit.output, new RegExp(`PATH=${kit.binDir}`));
 		assert.match(kit.output, /bin\/gentle-bounty lab-s43/);
+		// B1: the child PATH comes from the operator's config now, not from the shell.
+		const config = JSON.parse(await readFile(join(kit.root, ".bounty", "config.json"), "utf8"));
+		assert.ok((config.tool_path ?? []).includes(kit.binDir), JSON.stringify(config));
 		// The "hydra" only writes the marker.
 		execFileSync("sh", [join(kit.binDir, "hydra"), "-L", "x"], { encoding: "utf8" });
 		assert.match(await readFile(kit.marker, "utf8"), /called with: -L x/);
+	} finally {
+		await rm(kit.root, { recursive: true, force: true });
+	}
+});
+
+test("7d: the out-of-scope run of the kit leaves no execution record and one gate record", async () => {
+	const kit = await prepare();
+	try {
+		const scopePath = join(kit.root, "work", "lab-s43", "scope.yaml");
+		const session = createSession(
+			{ root: kit.root, program: "lab-s43" },
+			{
+				dns: async () => ({ cname: [] }),
+				readFile: (path) => readFile(path, "utf8"),
+				runTool: async () => ({ exitCode: 0, stdout: "no debería ejecutarse", stderr: "" }),
+				confirm: async () => true,
+			},
+		);
+		await session.scope({ file: scopePath });
+		await session.run({ tool: "curl", args: ["-sS", "http://127.0.0.1:33972/"], target: "http://127.0.0.1:33972/" });
+
+		const records = await createEvidenceStore(join(kit.root, "work", "lab-s43", "evidence"), { now: () => Date.now() }).read();
+		assert.equal(records.filter((record) => record.kind === "execution").length, 0, "a blocked run wrote an execution record");
+		const gate = records.filter((record) => record.kind === "gate");
+		assert.equal(gate.length, 1);
+		assert.match((gate[0]?.payload as { reason: string }).reason, /no in_scope rule matched 127\.0\.0\.1:33972/);
 	} finally {
 		await rm(kit.root, { recursive: true, force: true });
 	}

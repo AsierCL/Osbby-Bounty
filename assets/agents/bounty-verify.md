@@ -1,7 +1,7 @@
 ---
 name: bounty-verify
 description: Reproducir un hallazgo ajeno con contexto limpio: solo recibe el id y la evidencia, y reproduce con bounty_run.
-tools: read, grep, find, bounty_run, bounty_scope, bounty_evidence, bounty_finding, bounty_status
+tools: read, grep, find, bounty_run, bounty_scope, bounty_evidence, bounty_status
 ---
 
 # bounty-verify

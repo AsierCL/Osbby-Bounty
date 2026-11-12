@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { LAB_INJECTION, startLab, type Lab } from "../lab/server.ts";
 import { createFetchTool } from "../lab/http-tool.ts";
 import { createSession, type ProgramSession } from "../src/pi/session.ts";
+import { verifyFinding } from "./helpers/verifier-flow.ts";
 import { renderReport, validateReport } from "../src/core/report.ts";
 import { createEvidenceStore } from "../src/core/evidence.ts";
 
@@ -123,12 +124,12 @@ limits:
 			target: `http://127.0.0.1:${h.lab.port}/login`,
 		});
 		assert.equal(hydra.ok, false);
-		assert.match(hydra.text, /clase destructiva/);
+		assert.match(hydra.text, /Acción destructiva denegada por el humano/);
 		assert.equal(h.executed.length, 0);
 		assert.equal(h.confirmations.length, 1);
 		assert.match(h.confirmations[0] ?? "", /brute-force/);
 		const text = await statusOf(h);
-		assert.match(text, /destructiva necesita tu OK explícito/);
+		assert.match(text, /Última acción destructiva: denegaste a las \d{2}:\d{2}/);
 	} finally {
 		await h.cleanup();
 	}
@@ -180,7 +181,7 @@ test("negative 4: a rate above the program limit is destructive, so it pauses", 
 			target: `http://127.0.0.1:${h.lab.port}/FUZZ`,
 		});
 		assert.equal(ffuf.ok, false);
-		assert.match(ffuf.text, /clase destructiva/);
+		assert.match(ffuf.text, /Acción destructiva denegada por el humano/);
 		assert.equal(h.executed.length, 0);
 		assert.match(h.confirmations[0] ?? "", /exceeds the program rate of 5/);
 	} finally {
@@ -203,22 +204,32 @@ test("the positive path: two reproductions, a verified finding and a report that
 		const created = await h.session.finding({ action: "create", title: "IDOR en facturas", class: "idor", endpoint: "/api/invoices/2", parameter: "id" });
 		const id = (created.text.match(/F-\d{4}/) ?? [])[0];
 		assert.ok(id, created.text);
-		await h.session.finding({ action: "update", id, state: "verified", reason: "reproducido dos veces" });
+		// D1: only the verifier verdict, applied by code, moves the finding to verified.
+		const verdict = await verifyFinding({
+			root: h.dir,
+			program: "lab",
+			findingId: id,
+			endpoint: "/api/invoices/2",
+			target: `http://127.0.0.1:${h.lab.port}/api/invoices/2`,
+			scopePath: join(h.dir, "scope.yaml"),
+		});
+		assert.equal(verdict.applied.ok, true, verdict.applied.text);
 		await h.session.finding({ action: "update", id, state: "verified", cvss: "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N", score: 8.7 });
 
 		const store = createEvidenceStore(h.session.paths.evidenceDir, { now: () => Date.now() });
-		const verified = await store.verify();
-		assert.equal(verified.ok, true, JSON.stringify(verified));
+		const chain = await store.verify();
+		assert.equal(chain.ok, true, JSON.stringify(chain));
 
-		const finding = JSON.parse(await readFile(join(h.session.paths.findingsDir, `${id}.json`), "utf8"));
-		const markdown = renderReport({
-			finding,
-			evidence: await store.read(),
-			program: "lab",
-			reproductionSteps: ["GET /api/invoices/1 como alice", "GET /api/invoices/2 como alice", "repetir el segundo"],
+		// D3/S67: the report is written by the tool, which computes the score from the metrics.
+		const report = await h.session.report({
+			findingId: id as string,
+			metrics: { AV: "N", AC: "L", AT: "N", PR: "N", UI: "N", VC: "H", VI: "N", VA: "N", SC: "N", SI: "N", SA: "N" },
+			steps: ["GET /api/invoices/1 como alice", "GET /api/invoices/2 como alice", "repetir el segundo"],
 			impact: "Se leen facturas de otro usuario.",
 			remediation: "Verificar propiedad del recurso.",
 		});
+		assert.equal(report.ok, true, report.text);
+		const markdown = await readFile(join(h.dir, "work", "lab", "reports", `${id}.md`), "utf8");
 		const check = validateReport(markdown);
 		assert.equal(check.ok, true, `report missing: ${check.missing.join(", ")}`);
 		assert.match(markdown, /CVSS:4\.0\//);

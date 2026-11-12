@@ -86,7 +86,7 @@ async function preflight(program, root) {
 	};
 
 	// 1. test affordances must be off
-	for (const name of ["GENTLE_BOUNTY_ALLOW_CONFIRM_STUB", "GENTLE_BOUNTY_CONFIRM_TEST", "GENTLE_BOUNTY_PRELOAD_SCOPE"]) {
+	for (const name of ["GENTLE_BOUNTY_ALLOW_CONFIRM_STUB", "GENTLE_BOUNTY_CONFIRM_TEST", "GENTLE_BOUNTY_PRELOAD_SCOPE", "GENTLE_BOUNTY_VERIFIER"]) {
 		if (process.env[name] !== undefined && process.env[name] !== "") fail(`la variable ${name} está definida: las atafetas de test no van en una sesión real`);
 	}
 	if (failures.length === 0) ok("variables de test sin definir");
@@ -235,6 +235,8 @@ async function main(argv) {
 		return;
 	}
 
+	// B5: the verifier role no longer exists as an environment variable; never inherit one.
+	delete process.env.GENTLE_BOUNTY_VERIFIER;
 	const result = spawnSync(launch.command, launch.args, {
 		cwd: launch.cwd,
 		stdio: "inherit",

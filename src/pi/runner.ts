@@ -13,6 +13,7 @@
  * tool list against the allowlist and fails closed if the child had anything else (S19a: deterministic
  * inspection, not a question to the model).
  */
+import { randomUUID } from "node:crypto";
 import { spawn as nodeSpawn, type SpawnOptions } from "node:child_process";
 
 export type SpawnLike = (
@@ -55,6 +56,8 @@ export interface RunResult {
 	activeTools: string[];
 	exitCode: number | null;
 	durationMs: number;
+	/** D1: identity of the child session, generated here, never by the model. */
+	sessionId: string;
 	error?: string;
 }
 
@@ -147,6 +150,27 @@ function parseEvents(stdout: string): { output: string; toolCalls: ReportedToolC
 			activeTools = list.filter((item): item is string => typeof item === "string");
 			continue;
 		}
+		// D2: real Pi nests the assistant text under message_end/agent_end messages.
+		if (type === "message_end" || type === "agent_end" || type === "turn_end") {
+			const messages = Array.isArray(record.messages)
+				? record.messages
+				: typeof record.message === "object" && record.message !== null
+					? [record.message]
+					: [];
+			for (const message of messages) {
+				if (typeof message !== "object" || message === null) continue;
+				const entry = message as Record<string, unknown>;
+				if (entry.role !== "assistant") continue;
+				const content = Array.isArray(entry.content) ? entry.content : [];
+				for (const part of content) {
+					if (typeof part === "object" && part !== null && (part as { type?: string }).type === "text") {
+						const value = (part as { text?: unknown }).text;
+						if (typeof value === "string" && value.length > 0) texts.push(value);
+					}
+				}
+			}
+		}
+
 		if (type === "agent_end") {
 			// Real Pi reports the enabled tools here, in a system message with `toolsAdded`. This is the
 			// authoritative list (S19a/S41): the child's self-description in prose is not.
@@ -199,6 +223,7 @@ export function createPiRunner(options: PiRunnerOptions = {}): PiRunner {
 
 		run(request) {
 			const started = now();
+			const sessionId = randomUUID();
 			const { command, args } = buildChildArgs(request, options);
 			const timeoutMs = request.timeoutMs ?? defaultTimeoutMs;
 
@@ -210,7 +235,7 @@ export function createPiRunner(options: PiRunnerOptions = {}): PiRunner {
 
 				const child = spawn(command, args, {
 					cwd: request.cwd,
-					env: { ...process.env, ...(request.env ?? {}), GENTLE_BOUNTY_CHILD: "1" },
+					env: { ...process.env, ...(request.env ?? {}), GENTLE_BOUNTY_CHILD: "1", GENTLE_BOUNTY_SESSION_ID: sessionId },
 					stdio: ["ignore", "pipe", "pipe"],
 				});
 
@@ -231,6 +256,7 @@ export function createPiRunner(options: PiRunnerOptions = {}): PiRunner {
 						activeTools: parsed.activeTools,
 						exitCode,
 						durationMs: now() - started,
+						sessionId,
 						...(error !== undefined ? { error } : violation !== undefined ? { error: violation } : {}),
 					});
 				};

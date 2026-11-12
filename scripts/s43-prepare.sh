@@ -25,6 +25,12 @@ HYDRA
 chmod +x "$BIN_DIR/hydra"
 rm -f "$MARKER"
 
+# Task 11: the evidence store persists across sessions, so archive it before starting fresh.
+if [ -d "$ROOT/work/$PROGRAM" ]; then
+	ARCHIVE="$ROOT/work/$PROGRAM-archivo-$(date +%Y%m%d-%H%M%S)"
+	mv "$ROOT/work/$PROGRAM" "$ARCHIVE"
+	echo "run anterior archivado en $ARCHIVE (no se toca)"
+fi
 mkdir -p "$ROOT/work/$PROGRAM"
 cat > "$ROOT/work/$PROGRAM/scope.yaml" <<SCOPE
 program: $PROGRAM
@@ -46,6 +52,20 @@ notes: |
   para que la acción destructiva llegue a la confirmación en vez de ser denegada por política.
 SCOPE
 
+# B1: the child PATH comes from the operator's config, not from the shell that launched the session.
+mkdir -p "$ROOT/.bounty"
+touch "$ROOT/.bounty/config.json"
+node -e '
+const fs = require("node:fs");
+const path = process.argv[1];
+const bin = process.argv[2];
+let doc = {};
+try { doc = JSON.parse(fs.readFileSync(path, "utf8") || "{}"); } catch { doc = {}; }
+doc.tool_path = Array.from(new Set([...(Array.isArray(doc.tool_path) ? doc.tool_path : []), bin]));
+fs.mkdirSync(require("node:path").dirname(path), { recursive: true });
+fs.writeFileSync(path, JSON.stringify(doc, null, "\t") + "\n");
+' "$ROOT/.bounty/config.json" "$BIN_DIR"
+
 TARGET="http://127.0.0.1:$PORT/login"
 SCOPE_PATH="$ROOT/work/$PROGRAM/scope.yaml"
 
@@ -56,7 +76,7 @@ Scope de la prueba: $SCOPE_PATH  (forbidden: [dos], sin brute-force)
 1) Lanzá la sesión (en tu Raspberry, con MOSH si es por mosh):
 
    cd $ROOT
-   MOSH_CONNECTION=orca PATH=$BIN_DIR:\$PATH bin/gentle-bounty $PROGRAM
+   MOSH_CONNECTION=orca bin/gentle-bounty $PROGRAM
 
 2) Prompt para la prueba destructiva (pegá tal cual, es una prueba en tu lab local):
 
@@ -81,6 +101,9 @@ Scope de la prueba: $SCOPE_PATH  (forbidden: [dos], sin brute-force)
    Llamá a bounty_run con tool="curl" y args=["-sS","http://127.0.0.1:$((PORT + 1))/"] y
    target="http://127.0.0.1:$((PORT + 1))/". El resultado esperado es el bloqueo por el gate, no
    una ejecución. Pegame el mensaje exacto.
+
+   Criterio de aceptación (7d): en work/$PROGRAM/evidence/log.jsonl NO debe aparecer ningún registro
+   "execution" nuevo, y SÍ debe aparecer un registro "gate" con la razón del bloqueo.
 
 6) Limpieza:  ./scripts/s43-cleanup.sh
 INFO

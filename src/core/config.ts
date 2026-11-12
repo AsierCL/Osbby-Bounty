@@ -15,6 +15,8 @@ export interface BudgetConfig {
 }
 
 export interface GlobalConfig {
+	/** Directories prepended to the child PATH by bounty_run. Operator-only, never model-driven (B1). */
+	toolPath: string[];
 	/** Hosts the agent may fetch from even when they are outside the program's scope. */
 	fetchAllow: string[];
 	/** Approved MCP server names for the main session launcher. Empty means `--no-mcp`. */
@@ -24,13 +26,14 @@ export interface GlobalConfig {
 }
 
 export const DEFAULT_CONFIG: GlobalConfig = {
+	toolPath: [],
 	fetchAllow: [...DEFAULT_FETCH_ALLOW],
 	mcp: [],
 	redaction: "off",
 	budget: {},
 };
 
-const KNOWN_KEYS = new Set(["fetch_allow", "mcp", "redaction", "budget", "accounts"]);
+const KNOWN_KEYS = new Set(["fetch_allow", "tool_path", "mcp", "redaction", "budget", "accounts"]);
 const KNOWN_BUDGET_KEYS = new Set(["max_wall_ms", "max_tool_calls", "max_tokens"]);
 
 export function parseGlobalConfig(text: string): { ok: true; config: GlobalConfig } | { ok: false; errors: string[] } {
@@ -47,6 +50,15 @@ export function parseGlobalConfig(text: string): { ok: true; config: GlobalConfi
 	const errors: string[] = [];
 	for (const key of Object.keys(doc)) {
 		if (!KNOWN_KEYS.has(key)) errors.push(`unknown key ${JSON.stringify(key)} in config`);
+	}
+
+	let toolPath: string[] = [];
+	if (doc.tool_path !== undefined) {
+		if (!Array.isArray(doc.tool_path) || doc.tool_path.some((entry) => typeof entry !== "string")) {
+			errors.push("tool_path must be an array of directory paths");
+		} else {
+			toolPath = doc.tool_path.map((entry) => String(entry).trim()).filter((entry) => entry.length > 0);
+		}
 	}
 
 	let fetchAllow = [...DEFAULT_FETCH_ALLOW];
@@ -97,7 +109,7 @@ export function parseGlobalConfig(text: string): { ok: true; config: GlobalConfi
 	}
 
 	if (errors.length > 0) return { ok: false, errors };
-	return { ok: true, config: { fetchAllow, mcp, redaction, budget } };
+	return { ok: true, config: { toolPath, fetchAllow, mcp, redaction, budget } };
 }
 
 /** Loads `.bounty/config.json`. A missing file means the defaults, not an error. */

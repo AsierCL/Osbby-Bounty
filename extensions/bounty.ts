@@ -17,6 +17,9 @@ import { isIP } from "node:net";
 import { createSession, type ProgramSession, type ToolExecution } from "../src/pi/session.ts";
 import { loadGlobalConfig, type GlobalConfig } from "../src/core/config.ts";
 import { buildDomainPrompt } from "../src/pi/prompt.ts";
+import { createPiRunner } from "../src/pi/runner.ts";
+import { verifierTaskFor, parseVerdict } from "../src/pi/verifier.ts";
+import { createEvidenceStore } from "../src/core/evidence.ts";
 import type { BountyPhase } from "../src/core/status.ts";
 import type { RedactionMode } from "../src/core/redact.ts";
 
@@ -64,11 +67,16 @@ async function resolveForGate(host: string): Promise<{ cname: string[] } | { err
 	}
 }
 
-function runProcess(argv: string[], cwd: string): Promise<ToolExecution> {
+function runProcess(argv: string[], cwd: string, toolPath: string[] = []): Promise<ToolExecution> {
 	return new Promise((resolve) => {
 		const [command, ...args] = argv;
 		if (!command) return resolve({ exitCode: 127, stdout: "", stderr: "no command" });
-		const child = spawn(command, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+		// B1: the child PATH is exactly the operator's tool_path plus the inherited PATH. The model
+		// never touches it: it comes from .bounty/config.json, which only the human edits.
+		const env = toolPath.length === 0
+			? process.env
+			: { ...process.env, PATH: [...toolPath, process.env.PATH ?? ""].filter(Boolean).join(":") };
+		const child = spawn(command, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
 		let stdout = "";
 		let stderr = "";
 		child.stdout.on("data", (chunk) => {
@@ -123,21 +131,18 @@ export default function bountyExtension(pi: PiLike): void {
 	async function sessionFor(program: string): Promise<ProgramSession> {
 		const existing = sessions.get(program);
 		if (existing) return existing;
+		if (config === null) await globalConfig();
 		const created = createSession(
 			{
 				root,
 				program,
 				redaction: config?.redaction ?? redactionMode(),
 				budget: config?.budget,
-				// S66: the verifier runs in its own process and is launched with this flag.
-				verifier: process.env.GENTLE_BOUNTY_VERIFIER === "1",
 			},
 			{
 				dns: resolveForGate,
 				readFile: (path) => readFile(path, "utf8"),
-				runTool: (argv) => runProcess(argv, root),
-				// Fallback when a tool is invoked without a UI context: no confirmation means no.
-				confirm: async () => false,
+				runTool: (argv) => runProcess(argv, root, config?.toolPath ?? []),
 			},
 		);
 		sessions.set(program, created);
@@ -149,6 +154,23 @@ export default function bountyExtension(pi: PiLike): void {
 			await created.scope({ file: preload, confirm: true });
 		}
 		return created;
+	}
+
+	type UiContext = { ui?: { select?: (title: string, options: string[]) => Promise<string | undefined>; confirm?: (title: string, message?: string) => Promise<boolean> } };
+
+	/** B4: yes/no through the UI. "No" goes first, and only the explicit yes approves. */
+	function humanAsk(context: UiContext | undefined, title: string, detail: string): ((question: string) => Promise<boolean>) | undefined {
+		const ui = context?.ui;
+		if (typeof ui?.select === "function") {
+			return async (question: string) => {
+				const answer = await ui.select(`${title}\n\n${question}\n\n${detail}`, ["No, no ejecutar", "Sí, ejecutar"]);
+				return answer === "Sí, ejecutar";
+			};
+		}
+		if (typeof ui?.confirm === "function") {
+			return async (question: string) => Boolean(await ui.confirm(title, `${question}\n\n${detail}\n\nSi tenés dudas, respondé que no.`));
+		}
+		return undefined;
 	}
 
 	pi.registerTool({
@@ -169,11 +191,7 @@ export default function bountyExtension(pi: PiLike): void {
 		async execute(_toolCallId, params, _signal, _onUpdate, context) {
 			const session = await sessionFor(String(params.program));
 			// S63: the model's `confirm` flag is not an answer. Only the human UI is.
-			const ui = context?.ui;
-			const confirm =
-				typeof ui?.confirm === "function"
-					? async (question: string) => Boolean(await ui.confirm("Confirmar alcance", question))
-					: undefined;
+			const confirm = humanAsk(context, "Confirmar alcance", "Es la única vez que te voy a preguntar por este archivo de alcance.");
 			const result = await session.scope({ file: String(params.file), ...(confirm === undefined ? {} : { confirm }) });
 			return text(result.text, { ok: result.ok });
 		},
@@ -200,13 +218,12 @@ export default function bountyExtension(pi: PiLike): void {
 		} as never,
 		async execute(_toolCallId, params, _signal, _onUpdate, context) {
 			const session = await sessionFor(String(params.program));
-			// Verified in docs/extensions.md:84 and :197 — `await ctx.ui.confirm(title, message)`.
-			// The stub decision lives in the session, which knows whether the scope is a lab (S47).
-			const ui = context?.ui;
-			const confirm =
-				typeof ui?.confirm === "function"
-					? async (question: string) => Boolean(await ui.confirm("Confirmar acción destructiva", question))
-					: undefined;
+			// B4: title names the class and the full command; "No" is the first option.
+			const confirm = humanAsk(
+				context,
+				"ACCIÓN DESTRUCTIVA — confirmá sólo si estás seguro",
+				"Responder Sí ejecuta el comando tal cual. Responder No no ejecuta nada y queda registrado.",
+			);
 			const result = await session.run({
 				tool: String(params.tool),
 				args: Array.isArray(params.args) ? params.args.map(String) : [],
@@ -326,6 +343,53 @@ export default function bountyExtension(pi: PiLike): void {
 		async execute(_toolCallId, params) {
 			const result = await sessionFor(String(params.program)).stop(String(params.reason ?? "pedido del humano"));
 			return text(result.text, { ok: result.ok });
+		},
+	});
+
+	pi.registerTool({
+		name: "bounty_verify",
+		label: "Bounty verify",
+		description:
+			"Launch the independent verifier for a finding: it gets only the id and the artifacts, reproduces through bounty_run, and returns a structured verdict that the code applies. You cannot mark a finding verified yourself.",
+		parameters: {
+			type: "object",
+			additionalProperties: false,
+			properties: { program: { type: "string" }, finding_id: { type: "string" } },
+			required: ["program", "finding_id"],
+		} as never,
+		async execute(_toolCallId, params) {
+			const program = String(params.program);
+			const findingId = String(params.finding_id);
+			const session = await sessionFor(program);
+			const asset = await readFile(join(assetsDir, "agents", "bounty-verify.md"), "utf8");
+			const tools = (/^tools:\s*(.+)$/m.exec(asset)?.[1] ?? "").split(",").map((tool) => tool.trim()).filter(Boolean);
+			const store = createEvidenceStore(session.paths.evidenceDir, { now: () => Date.now() });
+			const task = verifierTaskFor({ id: findingId }, await store.read());
+			const timeoutMs = config?.budget?.maxWallMs ?? 15 * 60 * 1000;
+			const runner = createPiRunner({
+				piCommand: process.env.GENTLE_BOUNTY_PI ? [process.env.GENTLE_BOUNTY_PI] : ["pi"],
+				extensionEntry: fileURLToPath(import.meta.url),
+				defaultTimeoutMs: timeoutMs,
+			});
+			const result = await runner.run({
+				agent: { name: "bounty-verify", tools },
+				task,
+				cwd: root,
+				env: { GENTLE_BOUNTY_ROOT: root },
+				timeoutMs,
+			});
+			const verdict = parseVerdict(result.output);
+			const applied = await session.applyVerifierVerdict({
+				findingId,
+				verdict: verdict?.verdict ?? null,
+				seqs: verdict?.seqs ?? [],
+				reason: verdict?.reason ?? "",
+				verifierSessionId: result.sessionId,
+			});
+			return text(
+				`${applied.text}\n\nVerificador: exit=${String(result.exitCode)} · ${Math.round(result.durationMs / 1000)}s · tools: ${result.activeTools.join(", ") || "(ninguna)"}`,
+				{ ok: applied.ok },
+			);
 		},
 	});
 

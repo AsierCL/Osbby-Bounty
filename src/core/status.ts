@@ -20,6 +20,12 @@ export interface PendingConfirmation {
 	since: string;
 }
 
+export interface ConfirmationEvent {
+	outcome: "confirmed" | "denied" | "unavailable";
+	at: string;
+	detail: string;
+}
+
 export interface ProgramState {
 	program: string;
 	phase: BountyPhase;
@@ -29,6 +35,8 @@ export interface ProgramState {
 	/** sha256 of the scope file as it sits on disk right now (S63). */
 	scopeHash: string | null;
 	pending: PendingConfirmation | null;
+	/** B2: the last destructive confirmation, as a dated event instead of a stuck pending item. */
+	lastConfirmation: ConfirmationEvent | null;
 	nextStep: string;
 	notes: string[];
 	updatedAt: string;
@@ -96,9 +104,23 @@ export function renderStatus(input: { state: ProgramState; findings: Finding[]; 
 
 	lines.push("## Esperando tu confirmación");
 	lines.push("");
-	if (state.pending === null) {
+	const lastConfirmation = state.lastConfirmation ?? null;
+	if (state.pending === null && lastConfirmation === null) {
 		lines.push("Nada pendiente: sigo solo.");
-	} else {
+	} else if (state.pending === null) {
+		lines.push("Nada pendiente ahora.");
+	}
+	if (lastConfirmation !== null) {
+		const label =
+			lastConfirmation.outcome === "confirmed"
+				? "confirmaste"
+				: lastConfirmation.outcome === "denied"
+					? "denegaste"
+					: "no había UI para confirmar";
+		const when = (lastConfirmation.at ?? "").slice(11, 16);
+		lines.push(`- Última acción destructiva: ${label} a las ${when} — ${lastConfirmation.detail}`);
+	}
+	if (state.pending !== null) {
 		const kind =
 			state.pending.kind === "scope"
 				? "Confirmación del alcance de este programa"
@@ -129,6 +151,7 @@ export interface StatusStore {
 	setPending(pending: PendingConfirmation | null): Promise<ProgramState>;
 	confirmScope(hash?: string): Promise<ProgramState>;
 	setScopeHash(hash: string | null): Promise<ProgramState>;
+	setLastConfirmation(event: ConfirmationEvent | null): Promise<ProgramState>;
 	note(text: string): Promise<ProgramState>;
 	file(): string;
 }
@@ -152,6 +175,7 @@ export function createStatusStore(options: { workDir: string; program: string; n
 			scopeConfirmedHash: null,
 			scopeHash: null,
 			pending: null,
+			lastConfirmation: null,
 			nextStep: "",
 			notes: [],
 			updatedAt: new Date(now()).toISOString(),
@@ -188,6 +212,13 @@ export function createStatusStore(options: { workDir: string; program: string; n
 		async setPending(pending) {
 			const state = await this.read();
 			state.pending = pending === null ? null : { ...pending, since: pending.since || new Date(now()).toISOString() };
+			await this.write(state);
+			return state;
+		},
+
+		async setLastConfirmation(event) {
+			const state = await this.read();
+			state.lastConfirmation = event;
 			await this.write(state);
 			return state;
 		},

@@ -19,6 +19,7 @@ function state(overrides: Partial<ProgramState> = {}): ProgramState {
 		phase: "recon",
 		scopeConfirmedAt: null,
 		pending: null,
+		lastConfirmation: null,
 		nextStep: "",
 		notes: [],
 		updatedAt: new Date(NOW).toISOString(),

@@ -23,6 +23,7 @@ import { requestViewForModel, responseViewForModel, type RedactionMode } from ".
 import { parseScope, evaluate, type ScopePolicy } from "../core/scope.ts";
 import { scoreVector } from "../core/cvss.ts";
 import { renderReport, validateReport } from "../core/report.ts";
+import { randomUUID } from "node:crypto";
 import { createStatusStore, renderStatus, writeStatusFile, type BountyPhase, type ProgramState, type StatusStore } from "../core/status.ts";
 
 export interface ProgramConfig {
@@ -31,8 +32,8 @@ export interface ProgramConfig {
 	program: string;
 	redaction?: RedactionMode;
 	budget?: BudgetPolicy;
-	/** S66: only a verifier session may move a finding to verified/rejected. */
-	verifier?: boolean;
+	/** D1: identity of this session, used in chain records. Set by the runner for children. */
+	sessionId?: string;
 	now?: () => number;
 }
 
@@ -50,7 +51,8 @@ export interface SessionDeps {
 	dns: DnsResolver;
 	readFile: (path: string) => Promise<string>;
 	runTool: (argv: string[]) => Promise<ToolExecution>;
-	confirm: (question: string) => Promise<boolean>;
+	/** Absent means "there is no UI": the confirmation outcome is reported as unavailable (B3). */
+	confirm?: (question: string) => Promise<boolean>;
 }
 
 export interface ToolResult {
@@ -60,7 +62,16 @@ export interface ToolResult {
 
 export interface ProgramSession {
 	paths: { workspace: string; statusFile: string; evidenceDir: string; findingsDir: string };
+	sessionId: string;
 	stopController: StopController;
+	/** D1: the only path that can move a finding to verified/rejected. Called by code, never by the model. */
+	applyVerifierVerdict(input: {
+		findingId: string;
+		verdict: "REPRODUCIDO" | "NO_REPRODUCIDO" | null;
+		seqs: number[];
+		reason: string;
+		verifierSessionId: string;
+	}): Promise<ToolResult>;
 	/** Emergency stop: kills the children of bounty_run and records it. */
 	stop(reason: string): Promise<ToolResult>;
 	scope(input: { file: string; confirm?: boolean }): Promise<ToolResult>;
@@ -101,6 +112,26 @@ export interface ProgramSession {
 	status(): Promise<ToolResult>;
 }
 
+/** Kinds the model may append itself (7b). Everything else is written by code. */
+export const MODEL_EVIDENCE_KINDS = new Set(["observation", "recon-note", "erratum"]);
+
+/** B4: the question must be hard to answer wrong: class first, full command, explicit labels. */
+export function confirmQuestion(
+	classification: { classes: string[]; reason: string | null },
+	command: string,
+	target: string,
+): string {
+	const classes = classification.classes.length === 0 ? "sin clase inferida" : classification.classes.join(", ");
+	return [
+		`ACCIÓN DESTRUCTIVA — clase: ${classes}`,
+		`Motivo: ${classification.reason ?? "señal destructiva"}`,
+		`Comando completo: ${command}`,
+		`Objetivo: ${target}`,
+		"",
+		"¿La autorizás? Elegí NO si tenés cualquier duda.",
+	].join("\n");
+}
+
 export function createSession(config: ProgramConfig, deps: SessionDeps): ProgramSession {
 	const now = config.now ?? (() => Date.now());
 	const workspace = join(config.root, "work", config.program);
@@ -111,6 +142,7 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 	const findings: FindingsStore = createFindingsStore({ dir: findingsDir, program: config.program, now });
 	const evidence: EvidenceStore = createEvidenceStore(evidenceDir, { now });
 	const redaction: RedactionMode = config.redaction ?? "off";
+	const sessionId = config.sessionId ?? randomUUID();
 
 	let policy: ScopePolicy | null = null;
 	let scopePath: string | null = null;
@@ -133,7 +165,55 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 
 	return {
 		paths: { workspace, statusFile: status.file(), evidenceDir, findingsDir },
+		sessionId,
 		stopController,
+
+		async applyVerifierVerdict(input) {
+			const finding = await findings.get(input.findingId);
+			if (!finding) return { ok: false, text: `No existe el hallazgo ${input.findingId}.` };
+
+			const settle = async (event: string, detail: string, applied: boolean): Promise<ToolResult> => {
+				await evidence.append({
+					kind: "verification",
+					payload: { event, finding: input.findingId, verdict: input.verdict, seqs: input.seqs, verifierSessionId: input.verifierSessionId, detail, at: new Date(now()).toISOString(), sessionId },
+				});
+				await status.note(`verificación ${input.findingId}: ${event} — ${detail}`);
+				await refresh(applied ? "El veredicto se aplicó: revisá status.md." : "El veredicto no se pudo aplicar: el hallazgo sigue como candidato.");
+				return { ok: applied, text: detail };
+			};
+
+			if (input.verdict === null) {
+				return settle("unusable", "El verificador no devolvió un veredicto legible: el hallazgo sigue como candidato.", false);
+			}
+
+			if (input.verdict === "NO_REPRODUCIDO") {
+				await findings.update(finding.id, { state: "rejected" }, `verificador: ${input.reason || "no reproducido"}`);
+				return settle("rejected", `NO_REPRODUCIDO: el hallazgo pasó a rejected. Motivo: ${input.reason || "(sin motivo)"}`, true);
+			}
+
+			// REPRODUCIDO only counts if the chain has the verifier's own execution against this endpoint.
+			const records = await evidence.read();
+			const executions = records.filter(
+				(record) => record.kind === "execution" && (record.payload as { sessionId?: string }).sessionId === input.verifierSessionId,
+			);
+			const matching = executions.filter((record) => {
+				const payload = record.payload as { endpoint?: string; argv?: string[] };
+				const endpoint = payload.endpoint ?? "";
+				const argv = (payload.argv ?? []).join(" ");
+				return endpoint === finding.endpoint || argv.includes(finding.endpoint);
+			});
+			const claimed = input.seqs.length > 0 ? matching.filter((record) => input.seqs.includes(record.seq)) : matching;
+			if (claimed.length === 0) {
+				return settle(
+					"unsupported",
+					`El veredicto dice REPRODUCIDO pero la cadena no tiene ninguna ejecución de la sesión del verificador (${input.verifierSessionId.slice(0, 8)}…) contra ${finding.endpoint}. El hallazgo sigue como candidato.`,
+					false,
+				);
+			}
+
+			await findings.update(finding.id, { state: "verified" }, `verificador: reproducido en seq ${claimed.map((record) => record.seq).join(", ")}`);
+			return settle("verified", `REPRODUCIDO: verified con la evidencia seq ${claimed.map((record) => record.seq).join(", ")} de la sesión del verificador.`, true);
+		},
 
 		async stop(reason) {
 			const result = stopController.stop(reason);
@@ -279,6 +359,20 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 
 			const decision = await gate(current, request, { dns: deps.dns, readFile: deps.readFile });
 			if (!decision.allowed) {
+				// 7a/R9: a gate block is a system fact, so the chain records it, not only the model's prose.
+				await evidence.append({
+					kind: "gate",
+					payload: {
+						event: "gate-blocked",
+						reason: decision.reason,
+						detail: decision.detail ?? null,
+						tool: input.tool,
+						argv,
+						target: input.target,
+						at: new Date(now()).toISOString(),
+						sessionId,
+					},
+				});
 				await status.note(`bloqueado: ${decision.reason} (${input.tool} ${input.args.join(" ")})`);
 				await refresh(`Corregí el alcance o el comando: el gate bloqueó ${input.tool}.`);
 				return {
@@ -307,6 +401,18 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			// that can override it: to allow it, the scope has to be edited.
 			const forbiddenHit = classification.classes.filter((item) => current.limits.forbidden.includes(item));
 			if (forbiddenHit.length > 0) {
+				await evidence.append({
+					kind: "gate",
+					payload: {
+						event: "forbidden-class",
+						classes: forbiddenHit,
+						tool: input.tool,
+						argv,
+						target: input.target,
+						at: new Date(now()).toISOString(),
+						sessionId,
+					},
+				});
 				await status.note(`denegado por el programa: ${forbiddenHit.join(", ")} (${input.tool})`);
 				await refresh("El programa prohíbe esa clase: no se ejecuta.");
 				return {
@@ -315,23 +421,59 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				};
 			}
 
+			const confirmation = { note: "" };
+
 			if (classification.destructive) {
+				const requestedAt = new Date(now()).toISOString();
+				const command = `${input.tool} ${input.args.join(" ")}`.trim();
 				await status.setPending({
 					kind: "destructive",
-					detail: `${input.tool} ${input.args.join(" ")} contra ${input.target} — ${classification.reason ?? "señal destructiva"}`,
-					since: "",
+					detail: `${command} contra ${input.target} — ${classification.reason ?? "señal destructiva"}`,
+					since: requestedAt,
+				});
+				await evidence.append({
+					kind: "confirmation",
+					payload: {
+						event: "requested",
+						classes: classification.classes,
+						reason: classification.reason,
+						command,
+						target: input.target,
+						at: requestedAt,
+						sessionId,
+					},
 				});
 				await refresh("Esperando tu OK explícito para la acción destructiva.");
-				const question = `Esto puede romper algo (${classification.reason ?? "clasificada como destructiva"}): ${input.tool} ${input.args.join(" ")} contra ${input.target}. ¿Lo autorizás?`;
+
 				const resolved = resolveConfirm({ env: deps.env, lab: current.lab, uiConfirm: input.confirm ?? deps.confirm });
-				const approved = await resolved.confirm(question);
-				if (!approved) {
-					return {
-						ok: false,
-						text: `Pausado: es una acción de clase destructiva y no tengo tu OK. No se ejecutó nada.\nLo dejé pedido en ${status.file()}.`,
-					};
-				}
+				const approved = await resolved.confirm(confirmQuestion(classification, command, input.target));
+				const outcome = resolved.source === "none" ? "unavailable" : approved ? "granted" : "denied";
+				const at = new Date(now()).toISOString();
+				const hhmm = at.slice(11, 16);
+
+				// B2: the pending item is cleared AND status.md is rewritten, so nothing stays stale.
 				await status.setPending(null);
+				await status.setLastConfirmation({
+					outcome: outcome === "granted" ? "confirmed" : outcome === "denied" ? "denied" : "unavailable",
+					at,
+					detail: `${command} — ${classification.reason ?? "clase destructiva"}`,
+				});
+				await evidence.append({
+					kind: "confirmation",
+					payload: { event: outcome, classes: classification.classes, command, target: input.target, at, sessionId },
+				});
+
+				if (outcome !== "granted") {
+					const text =
+						outcome === "denied"
+							? `Acción destructiva denegada por el humano a las ${hhmm}. No se ejecutó nada.`
+							: `Acción destructiva sin UI: no confirmada a las ${hhmm}. No se ejecutó nada.`;
+					await refresh("La acción destructiva quedó denegada. Decime si querés otro camino.");
+					return { ok: false, text };
+				}
+				// B3: the outcome is part of what the model sees, always.
+				confirmation.note = `Acción destructiva confirmada por el humano a las ${hhmm}.`;
+				await refresh("Ejecuto la acción destructiva que confirmaste.");
 			}
 
 			// S37: the wall clock is checked before anything else costs time or money.
@@ -360,7 +502,10 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				return { ok: false, text: `Presupuesto agotado: ${budgetHit.message}. No se ejecutó nada.` };
 			}
 
-			await evidence.append({ kind: "execution", payload: { tool: input.tool, argv, contacts: decision.contacts, technique: input.technique ?? null } });
+			await evidence.append({
+				kind: "execution",
+				payload: { tool: input.tool, argv, contacts: decision.contacts, technique: input.technique ?? null, endpoint: new URL(input.target).pathname, at: new Date(now()).toISOString(), sessionId },
+			});
 
 			let execution: ToolExecution;
 			try {
@@ -385,6 +530,7 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			return {
 				ok: execution.exitCode === 0,
 				text: [
+					...(confirmation.note === "" ? [] : [confirmation.note]),
 					`${input.tool} terminó con código ${execution.exitCode}.`,
 					`Contactado: ${contactLines || "nada"}.`,
 					viewed.body === null ? "(sin salida)" : viewed.body,
@@ -397,6 +543,19 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 		async evidence(input) {
 			if (input.action === "append") {
 				if (typeof input.kind !== "string") return { ok: false, text: "Falta kind para anotar evidencia." };
+				// 7b: system kinds (execution, gate, confirmation, …) are written by code only.
+				if (!MODEL_EVIDENCE_KINDS.has(input.kind)) {
+					return {
+						ok: false,
+						text: `El kind "${input.kind}" está reservado al sistema. Vos podés anotar: ${[...MODEL_EVIDENCE_KINDS].join(", ")}.`,
+					};
+				}
+				if (input.kind === "erratum") {
+					const refSeq = (input.payload as { refSeq?: unknown } | undefined)?.refSeq;
+					if (typeof refSeq !== "number") return { ok: false, text: "Un erratum necesita payload.refSeq (el número de seq al que corrige)." };
+					const exists = (await evidence.read()).some((record) => record.seq === refSeq);
+					if (!exists) return { ok: false, text: `No existe el seq ${refSeq}: no puedo colgar un erratum de la nada.` };
+				}
 				const record = await evidence.append({ kind: input.kind, payload: input.payload });
 				return { ok: true, text: `Evidencia anotada: seq ${record.seq}, hash ${record.hash.slice(0, 12)}…` };
 			}
@@ -407,7 +566,16 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 					: { ok: false, text: `La cadena de evidencia está rota: ${result.reason}` };
 			}
 			const records = await evidence.read();
-			return { ok: true, text: records.map((record) => `${record.seq}. ${record.kind} (${record.ts})`).join("\n") || "Sin evidencia todavía." };
+			const errata = records
+				.filter((record) => record.kind === "erratum")
+				.map((record) => ({ refSeq: Number((record.payload as { refSeq?: number }).refSeq), text: String((record.payload as { note?: string }).note ?? "") }));
+			const lines = records
+				.filter((record) => record.kind !== "erratum")
+				.map((record) => {
+					const corrections = errata.filter((item) => item.refSeq === record.seq).map((item) => `  ↳ erratum: ${item.text}`);
+					return [`${record.seq}. ${record.kind} (${record.ts})`, ...corrections].join("\n");
+				});
+			return { ok: true, text: lines.join("\n") || "Sin evidencia todavía." };
 		},
 
 		async finding(input) {
@@ -432,11 +600,12 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			}
 			if (input.action === "update") {
 				if (!input.id || !input.state) return { ok: false, text: "Para actualizar necesito id y state." };
-				// S66: the agent that found something does not get to call it verified.
-				if ((input.state === "verified" || input.state === "rejected") && config.verifier !== true) {
+				// D1: the model never moves a finding to verified/rejected. Only the verifier verdict,
+				// applied by code in applyVerifierVerdict, can do it.
+				if (input.state === "verified" || input.state === "rejected") {
 					return {
 						ok: false,
-						text: `Un hallazgo solo pasa a ${input.state} por el verificador independiente (lanza bounty-verify con el id y la evidencia). El agente que lo encontró no puede marcarlo.`,
+						text: `Un hallazgo solo pasa a ${input.state} por el veredicto del verificador (bounty_verify). El agente que lo encontró no puede marcarlo.`,
 					};
 				}
 				try {
