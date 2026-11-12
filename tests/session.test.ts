@@ -280,3 +280,63 @@ test("a phase transition rewrites status.md and bounty_status returns the same t
 		await h.cleanup();
 	}
 });
+
+test("a spent tool budget stops the run and says so in status.md", async () => {
+	const dir = await mkdtemp(join(tmpdir(), "bounty-budget-"));
+	try {
+		await mkdir(join(dir, "work", "lab"), { recursive: true });
+		await writeFile(join(dir, "scope.yaml"), SCOPE, "utf8");
+		const executed: string[][] = [];
+		const session = createSession(
+			{ root: dir, program: "lab", budget: { maxToolCalls: 1 } },
+			{
+				dns: async () => ({ cname: [] }),
+				readFile: async (path: string) => readFile(path, "utf8"),
+				runTool: async (argv: string[]) => {
+					executed.push(argv);
+					return { exitCode: 0, stdout: "ok", stderr: "" };
+				},
+				confirm: async () => true,
+			} as never,
+		);
+		await session.scope({ file: join(dir, "scope.yaml"), confirm: true });
+		const first = await session.run({ tool: "httpx", args: ["-u", "http://127.0.0.1:3000/a"], target: "http://127.0.0.1:3000/a" });
+		assert.equal(first.ok, true, first.text);
+		const second = await session.run({ tool: "httpx", args: ["-u", "http://127.0.0.1:3000/b"], target: "http://127.0.0.1:3000/b" });
+		assert.equal(second.ok, false);
+		assert.match(second.text, /Presupuesto agotado: se alcanzó el límite de 1 llamadas/);
+		assert.equal(executed.length, 1);
+		const text = await readFile(join(dir, "work", "lab", "status.md"), "utf8");
+		assert.match(text, /presupuesto agotado/i);
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+test("emergency stop kills children, keeps evidence consistent and refuses further runs", async () => {
+	const dir = await mkdtemp(join(tmpdir(), "bounty-stop-"));
+	try {
+		await mkdir(join(dir, "work", "lab"), { recursive: true });
+		await writeFile(join(dir, "scope.yaml"), SCOPE, "utf8");
+		const killed: number[] = [];
+		const session = createSession({ root: dir, program: "lab" }, {
+			dns: async () => ({ cname: [] }),
+			readFile: async (path: string) => readFile(path, "utf8"),
+			runTool: async () => ({ exitCode: 0, stdout: "ok", stderr: "" }),
+			confirm: async () => true,
+		} as never);
+		await session.scope({ file: join(dir, "scope.yaml"), confirm: true });
+		await session.run({ tool: "httpx", args: ["-u", "http://127.0.0.1:3000/"], target: "http://127.0.0.1:3000/" });
+		session.stopController.register({ pid: 4321, kill: () => (killed.push(4321), true) });
+		const stopped = await session.stop("prueba de parada");
+		assert.equal(stopped.ok, true);
+		assert.match(stopped.text, /Parada de emergencia ejecutada/);
+		assert.match(stopped.text, /consistente/);
+		assert.deepEqual(killed, [4321]);
+		const after = await session.run({ tool: "httpx", args: ["-u", "http://127.0.0.1:3000/"], target: "http://127.0.0.1:3000/" });
+		assert.equal(after.ok, false);
+		assert.match(after.text, /Parada de emergencia activa/);
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});

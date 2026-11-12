@@ -12,6 +12,8 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
 import { classifyDestructive } from "../core/destructive.ts";
+import { createBudget, type BudgetPolicy } from "./budget.ts";
+import { createStopController, type StopController } from "./stop.ts";
 import { createEvidenceStore, type EvidenceStore } from "../core/evidence.ts";
 import { createFindingsStore, type Finding, type FindingsStore } from "../core/findings.ts";
 import { gate, type DnsResolver, type GateRequest } from "../core/gate.ts";
@@ -25,6 +27,7 @@ export interface ProgramConfig {
 	root: string;
 	program: string;
 	redaction?: RedactionMode;
+	budget?: BudgetPolicy;
 	now?: () => number;
 }
 
@@ -32,6 +35,8 @@ export interface ToolExecution {
 	exitCode: number;
 	stdout: string;
 	stderr: string;
+	/** Reported by Pi when it knows: used for the run budget (S37). */
+	tokens?: number;
 }
 
 export interface SessionDeps {
@@ -48,6 +53,9 @@ export interface ToolResult {
 
 export interface ProgramSession {
 	paths: { workspace: string; statusFile: string; evidenceDir: string; findingsDir: string };
+	stopController: StopController;
+	/** Emergency stop: kills the children of bounty_run and records it. */
+	stop(reason: string): Promise<ToolResult>;
 	scope(input: { file: string; confirm?: boolean }): Promise<ToolResult>;
 	run(input: {
 		tool: string;
@@ -88,6 +96,8 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 	let policy: ScopePolicy | null = null;
 	let scopePath: string | null = null;
 	let limiter: Limiter | null = null;
+	const budget = createBudget(config.budget ?? {}, now);
+	const stopController = createStopController({ now });
 
 	async function refresh(next?: string): Promise<string> {
 		const state = await status.read();
@@ -104,6 +114,19 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 
 	return {
 		paths: { workspace, statusFile: status.file(), evidenceDir, findingsDir },
+		stopController,
+
+		async stop(reason) {
+			const result = stopController.stop(reason);
+			await evidence.append({ kind: "stopped", payload: { reason, killed: result.killed, at: result.at } });
+			await status.note(`parada de emergencia: ${reason} (${result.killed} proceso(s) terminado(s))`);
+			await refresh("Parada de emergencia. No se ejecuta nada más hasta que lo pidas.");
+			const verified = await evidence.verify();
+			return {
+				ok: true,
+				text: `Parada de emergencia ejecutada: ${result.killed} proceso(s) terminado(s). El evidence store quedó ${verified.ok ? `consistente (${verified.count} registros)` : `INCONSISTENTE: ${verified.reason}`}.`,
+			};
+		},
 
 		async scope(input) {
 			await mkdir(workspace, { recursive: true });
@@ -163,6 +186,9 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 
 		async run(input) {
 			await mkdir(workspace, { recursive: true });
+			if (stopController.isStopped()) {
+				return { ok: false, text: `Parada de emergencia activa (${stopController.reason() ?? "sin motivo"}): no se ejecuta nada.` };
+			}
 			let current: ScopePolicy;
 			try {
 				current = requirePolicy();
@@ -223,6 +249,14 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				await status.setPending(null);
 			}
 
+			// S37: the wall clock is checked before anything else costs time or money.
+			const wallHit = budget.exceeded();
+			if (wallHit !== null) {
+				await status.note(`presupuesto agotado: ${wallHit.message}`);
+				await refresh("Presupuesto de la corrida agotado. Decime si abrimos otra.");
+				return { ok: false, text: `Presupuesto agotado: ${wallHit.message}. Quedó anotado en ${status.file()}.` };
+			}
+
 			if (limiter !== null) {
 				const host = decision.contacts[0]?.host ?? "unknown";
 				const reservation = limiter.reserve(host);
@@ -232,6 +266,13 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 					return { ok: false, text: `Frenado por el límite del programa: ${reservation.reason}` };
 				}
 				if (reservation.delayMs > 0) await new Promise((resolve) => setTimeout(resolve, reservation.delayMs));
+			}
+
+			const budgetHit = budget.toolCall();
+			if (budgetHit !== null) {
+				await status.note(`presupuesto agotado: ${budgetHit.message}`);
+				await refresh("Presupuesto de la corrida agotado. Decime si abrimos otra.");
+				return { ok: false, text: `Presupuesto agotado: ${budgetHit.message}. No se ejecutó nada.` };
 			}
 
 			await evidence.append({ kind: "execution", payload: { tool: input.tool, argv, contacts: decision.contacts, technique: input.technique ?? null } });
@@ -248,6 +289,8 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				kind: "execution-result",
 				payload: { tool: input.tool, exitCode: execution.exitCode, stdout: execution.stdout, stderr: execution.stderr },
 			});
+
+			if (typeof execution.tokens === "number") budget.tokens(execution.tokens);
 
 			const viewed = responseViewForModel(
 				{ status: execution.exitCode, headers: {}, body: execution.stdout || execution.stderr },

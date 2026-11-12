@@ -8,11 +8,13 @@
  * **It has not been executed inside a live Pi session yet** — that is the first thing Phase E does.
  */
 import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { resolveCname } from "node:dns/promises";
 import { isIP } from "node:net";
 
 import { createSession, type ProgramSession, type ToolExecution } from "../src/pi/session.ts";
+import { loadGlobalConfig, type GlobalConfig } from "../src/core/config.ts";
 import type { BountyPhase } from "../src/core/status.ts";
 import type { RedactionMode } from "../src/core/redact.ts";
 
@@ -87,12 +89,24 @@ function runProcess(argv: string[], cwd: string): Promise<ToolExecution> {
 export default function bountyExtension(pi: PiLike): void {
 	const root = process.env.GENTLE_BOUNTY_ROOT ?? process.cwd();
 	const sessions = new Map<string, ProgramSession>();
+	let config: GlobalConfig | null = null;
+
+	async function globalConfig(): Promise<GlobalConfig | null> {
+		if (config) return config;
+		try {
+			config = await loadGlobalConfig((path) => readFile(path, "utf8"), join(root, ".bounty", "config.json"));
+			return config;
+		} catch (error) {
+			console.error(`gentle-bounty: config rejected, running with defaults: ${(error as Error).message}`);
+			return null;
+		}
+	}
 
 	function sessionFor(program: string): ProgramSession {
 		const existing = sessions.get(program);
 		if (existing) return existing;
 		const created = createSession(
-			{ root, program, redaction: redactionMode() },
+			{ root, program, redaction: config?.redaction ?? redactionMode(), budget: config?.budget },
 			{
 				dns: resolveForGate,
 				readFile: (path) => readFile(path, "utf8"),
@@ -253,6 +267,22 @@ export default function bountyExtension(pi: PiLike): void {
 				phase: params.phase as BountyPhase,
 				...(params.next_step === undefined ? {} : { nextStep: String(params.next_step) }),
 			});
+			return text(result.text, { ok: result.ok });
+		},
+	});
+
+	pi.registerTool({
+		name: "bounty_stop",
+		label: "Bounty stop",
+		description: "Emergency stop: kills every process launched by bounty_run and records it in the evidence chain.",
+		parameters: {
+			type: "object",
+			additionalProperties: false,
+			properties: { program: { type: "string" }, reason: { type: "string" } },
+			required: ["program"],
+		} as never,
+		async execute(_toolCallId, params) {
+			const result = await sessionFor(String(params.program)).stop(String(params.reason ?? "pedido del humano"));
 			return text(result.text, { ok: result.ok });
 		},
 	});
