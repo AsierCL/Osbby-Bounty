@@ -111,12 +111,8 @@ export default function bountyExtension(pi: PiLike): void {
 				dns: resolveForGate,
 				readFile: (path) => readFile(path, "utf8"),
 				runTool: (argv) => runProcess(argv, root),
-				// No confirmation UI means no confirmation: a destructive action is refused, never assumed.
-				confirm: async (question) => {
-					const ui = (globalThis as { __piToolContext?: PiToolContext }).__piToolContext?.ui;
-					if (typeof ui?.confirm !== "function") return false;
-					return Boolean(await ui.confirm("Confirmar acción destructiva", question));
-				},
+				// Fallback when a tool is invoked without a UI context: no confirmation means no.
+				confirm: async () => false,
 			},
 		);
 		sessions.set(program, created);
@@ -164,12 +160,19 @@ export default function bountyExtension(pi: PiLike): void {
 			},
 			required: ["program", "tool", "args", "target"],
 		} as never,
-		async execute(_toolCallId, params) {
+		async execute(_toolCallId, params, _signal, _onUpdate, context) {
 			const session = sessionFor(String(params.program));
+			// Verified in docs/extensions.md:84 and :197 — `await ctx.ui.confirm(title, message)`.
+			const confirm = async (question: string): Promise<boolean> => {
+				const ui = context?.ui;
+				if (typeof ui?.confirm !== "function") return false;
+				return Boolean(await ui.confirm("Confirmar acción destructiva", question));
+			};
 			const result = await session.run({
 				tool: String(params.tool),
 				args: Array.isArray(params.args) ? params.args.map(String) : [],
 				target: String(params.target),
+				confirm,
 				...(params.technique === undefined ? {} : { technique: String(params.technique) }),
 				...(params.method === undefined ? {} : { method: String(params.method) }),
 				...(params.follow_redirects === undefined ? {} : { followRedirects: params.follow_redirects === true }),

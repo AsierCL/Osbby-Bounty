@@ -74,6 +74,17 @@ const FILE_FLAGS = new Set([
 	"--html",
 	"--markdown",
 	"-stats-json",
+	// Wordlist flags: their value is a local file, and a name like `passwords.txt` parses as a host.
+	"-P",
+	"--passwords",
+	"-p",
+	"--pass",
+	"-U",
+	"--userlist",
+	"--user-list",
+	"-L",
+	"--login-list",
+	"--logins",
 ]);
 
 const LIST_FLAGS = new Set(["-l", "--list", "--list-file", "--hosts", "--targets", "-targets", "--host-file"]);

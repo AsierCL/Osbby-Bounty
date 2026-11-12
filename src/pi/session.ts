@@ -64,6 +64,8 @@ export interface ProgramSession {
 		technique?: string;
 		method?: string;
 		followRedirects?: boolean;
+		/** Per-call confirmation, so the adapter can hand over the live UI callback. */
+		confirm?: (question: string) => Promise<boolean>;
 	}): Promise<ToolResult>;
 	evidence(input: { action: "append" | "verify" | "list"; kind?: string; payload?: unknown }): Promise<ToolResult>;
 	finding(input: {
@@ -76,6 +78,8 @@ export interface ProgramSession {
 		state?: Finding["state"];
 		confidence?: Finding["confidence"];
 		sensitive?: boolean;
+		cvss?: string;
+		score?: number;
 		reason?: string;
 	}): Promise<ToolResult>;
 	phase(input: { phase: BountyPhase; nextStep?: string }): Promise<ToolResult>;
@@ -239,7 +243,7 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				});
 				await refresh("Esperando tu OK explícito para la acción destructiva.");
 				const question = `Esto puede romper algo (${classification.reason ?? "clasificada como destructiva"}): ${input.tool} ${input.args.join(" ")} contra ${input.target}. ¿Lo autorizás?`;
-				const approved = await deps.confirm(question);
+				const approved = await (input.confirm ?? deps.confirm)(question);
 				if (!approved) {
 					return {
 						ok: false,
@@ -350,7 +354,13 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				try {
 					const updated = await findings.update(
 						input.id,
-						{ state: input.state, confidence: input.confidence, sensitive: input.sensitive },
+						{
+							state: input.state,
+							confidence: input.confidence,
+							sensitive: input.sensitive,
+							...(input.cvss === undefined ? {} : { cvss: input.cvss }),
+							...(input.score === undefined ? {} : { score: input.score }),
+						},
 						input.reason ?? "sin motivo",
 					);
 					if (updated.sensitive) await status.note(`${updated.id}: hallazgo sensible — revisar antes de reportar`);
