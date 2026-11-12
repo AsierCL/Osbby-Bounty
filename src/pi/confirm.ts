@@ -19,17 +19,27 @@ export type ConfirmSource = "ui" | "stub-yes" | "stub-no" | "none";
 export interface ConfirmResolution {
 	confirm: ConfirmFn;
 	source: ConfirmSource;
+	/** True when the stub variables are present, even if the stub was refused. */
+	stubRequested: boolean;
 }
 
 export function resolveConfirm(options: {
 	env?: NodeJS.ProcessEnv;
 	uiConfirm?: ConfirmFn;
+	/** S47: the stub only answers inside a scope the operator declared as `lab: true`. */
+	lab?: boolean;
 }): ConfirmResolution {
 	const env = options.env ?? process.env;
 	const allowStub = env.GENTLE_BOUNTY_ALLOW_CONFIRM_STUB === "1";
 	const mode = env.GENTLE_BOUNTY_CONFIRM_TEST;
-	if (allowStub && (mode === "yes" || mode === "no")) {
+	const stubRequested = allowStub && (mode === "yes" || mode === "no");
+	if (stubRequested && options.lab !== true) {
+		// The stub was asked for outside a lab: refuse loudly and fall through to the safe path.
+		console.error("[gentle-bounty] stub de confirmación RECHAZADO: el scope no está marcado como lab: true");
+	}
+	if (stubRequested && options.lab === true) {
 		return {
+			stubRequested: true,
 			source: mode === "yes" ? "stub-yes" : "stub-no",
 			confirm: async (question: string) => {
 				console.error(`[gentle-bounty] respuesta de confirmación provista por STUB (${mode}): ${question}`);
@@ -37,7 +47,7 @@ export function resolveConfirm(options: {
 			},
 		};
 	}
-	if (typeof options.uiConfirm === "function") return { confirm: options.uiConfirm, source: "ui" };
+	if (typeof options.uiConfirm === "function") return { confirm: options.uiConfirm, source: "ui", stubRequested };
 	// No UI means no answer, and no answer means no.
-	return { confirm: async () => false, source: "none" };
+	return { confirm: async () => false, source: "none", stubRequested };
 }

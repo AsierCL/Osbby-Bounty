@@ -32,6 +32,16 @@ bin/gentle-bounty acme --check
 
 Solo tres. Entre ellas, el agente trabaja solo.
 
+El archivo de alcance tiene un campo obligatorio que no es decorativo:
+
+```yaml
+program: acme
+lab: false        # false = programa real; true = laboratorio propio
+```
+
+Si te olvidás de `lab`, el alcance no carga. Si ponés `lab: true` en un programa real, estás
+declarando que lo es, y las atafetas de test de la confirmación quedan habilitadas: no lo hagas.
+
 **1. Primera vez que cargás un alcance.** Te muestra el resumen y espera tu OK una vez por programa:
 
 ```

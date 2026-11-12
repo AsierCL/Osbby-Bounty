@@ -45,6 +45,8 @@ export interface AutomationPolicy {
 
 export interface ScopePolicy {
 	program: string;
+	/** S47: true only for a lab the operator owns. Gates the confirmation test stub. */
+	lab: boolean;
 	platform: string | null;
 	authorizedOn: string | null;
 	inScope: ScopeRule[];
@@ -67,6 +69,7 @@ export type ScopeVerdict =
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
 const TOP_LEVEL_KEYS = new Set([
 	"program",
+	"lab",
 	"platform",
 	"authorized_on",
 	"in_scope",
@@ -425,6 +428,19 @@ export function parseScope(text: string): ScopeParseResult {
 	}
 
 	const requiredHeaders = asMap(doc.required_headers, "required_headers", errors) ?? {};
+	// S47: mandatory and strict. Without it the scope does not load, same fail-closed rule as the rest.
+	const labText = asString(doc.lab, "lab", errors);
+	let lab: boolean | null = null;
+	if (labText === null) {
+		if (doc.lab === undefined) errors.push('lab is required: "true" for a lab you own, "false" for a real program');
+	} else if (labText === "true") {
+		lab = true;
+	} else if (labText === "false") {
+		lab = false;
+	} else {
+		errors.push(`lab must be true or false, got ${JSON.stringify(labText)}`);
+	}
+
 	const authorizedOn = asString(doc.authorized_on, "authorized_on", errors);
 	const platform = asString(doc.platform, "platform", errors);
 	const notes = doc.notes === undefined ? null : typeof doc.notes === "string" ? doc.notes : null;
@@ -440,6 +456,7 @@ export function parseScope(text: string): ScopeParseResult {
 		warnings,
 		policy: {
 			program: program ?? "",
+			lab: lab === true,
 			platform,
 			authorizedOn,
 			inScope,

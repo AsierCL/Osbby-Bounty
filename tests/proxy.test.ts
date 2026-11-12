@@ -32,7 +32,7 @@ async function listen(server: Server | ReturnType<typeof createNetServer>): Prom
 
 function scopeFor(port: number, extra = "") {
 	const parsed = parseScope(
-		`program: lab\nauthorized_on: 2026-11-01\nin_scope:\n  - 127.0.0.1:${port}\nlimits:\n  rate_rps: 50\n${extra}`,
+		`program: lab\nlab: true\nauthorized_on: 2026-11-01\nin_scope:\n  - 127.0.0.1:${port}\nlimits:\n  rate_rps: 50\n${extra}`,
 	);
 	assert.equal(parsed.ok, true, JSON.stringify(parsed));
 	if (!parsed.ok) throw new Error("unreachable");

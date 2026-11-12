@@ -513,6 +513,49 @@ verlo con la evidencia del punto 1 en la mano antes de confirmarlo, no solo "tes
 Próximo checkpoint: tras cerrar 1-3. Mismo formato de informe. Pará y esperá ahí.
 ```
 
+### S47 — Guardarraíl del confirm-stub (enmienda a S43)
+
+```
+1. Guardarraíl del confirm-stub (hacelo YA, antes de que yo corra la prueba manual). El riesgo que
+   vos mismo señalaste — que GENTLE_BOUNTY_ALLOW_CONFIRM_STUB puede aprobar una acción destructiva
+   si alguien define las dos variables — pasa de documentado a imposible en el camino normal:
+   - Añadí un campo obligatorio en el esquema estricto del scope: `lab: true | false`. Sin ese
+     campo, el scope no carga (mismo criterio fail-closed que ya usás en todo el proyecto).
+   - Al arrancar una sesión: si las variables del stub están definidas Y el scope cargado tiene
+     `lab: false` (o no está marcado como lab), la sesión se niega a iniciar con un error explícito
+     en status.md. Las variables del stub solo pueden tener efecto cuando `lab: true`.
+   - Test que lo demuestre: scope real + stub activo ⇒ sesión rechazada; scope de lab + stub activo
+     ⇒ funciona como ahora.
+   - Marcá work/lab/scope.yaml con lab: true si no lo tiene ya.
+```
+
+### S48 — S43 sigue pendiente del humano
+
+```
+2. S43 queda PENDIENTE de mi verificación manual. Voy a correr el procedimiento de
+   docs/evidence/confirm-live.md yo mismo. Te aviso el resultado antes de que seas vos quien marque
+   el checklist como GO. Mientras tanto no asumas aprobación.
+```
+
+### S49 — Fase F autorizada
+
+```
+3. S45 (Fase F) AUTORIZADA en paralelo, bajo S21a, sin cambios.
+```
+
+### S50 — Segundo anclaje CVSS (sugerencia no bloqueante)
+
+```
+4. Sugerencia no bloqueante para S42: si tenés margen en la Fase F, sumá un segundo vector de CVE
+   publicado (además de Log4Shell) como anclaje cruzado, dado que el score ahora sale directo en
+   reportes a programas reales. No es requisito para GO.
+```
+
+```
+Cuando tenga el resultado de mi prueba manual y confirmes el guardarraíl del punto 1, te doy la
+decisión final de GO/NO-GO por escrito. No caragues ningún scope real hasta esa confirmación.
+```
+
 ## Tasks
 
 | ID | Tarea | Spec | Ruta | Commit |
@@ -1089,3 +1132,35 @@ natural, igual de visible que el hueco de `-o/-t`.
 revisión de los cuatro repos de bounty sigue sin hacer.
 
 Estado: **241 tests, 0 fallos**.
+
+### L16 — Checkpoint 5 parcial: enmiendas S47-S50 (verbatim)
+
+```text
+Checkpoint 5 recibido. S41, S42, S44, S46 APROBADOS. S43 queda abierto hasta que yo confirme el
+resultado de la prueba manual. Registrá esto como S47 en adelante.
+
+1. Guardarraíl del confirm-stub (hacelo YA, antes de que yo corra la prueba manual). El riesgo que
+   vos mismo señalaste — que GENTLE_BOUNTY_ALLOW_CONFIRM_STUB puede aprobar una acción destructiva
+   si alguien define las dos variables — pasa de documentado a imposible en el camino normal:
+   - Añadí un campo obligatorio en el esquema estricto del scope: `lab: true | false`. Sin ese
+     campo, el scope no carga (mismo criterio fail-closed que ya usás en todo el proyecto).
+   - Al arrancar una sesión: si las variables del stub están definidas Y el scope cargado tiene
+     `lab: false` (o no está marcado como lab), la sesión se niega a iniciar con un error explícito
+     en status.md. Las variables del stub solo pueden tener efecto cuando `lab: true`.
+   - Test que lo demuestre: scope real + stub activo ⇒ sesión rechazada; scope de lab + stub activo
+     ⇒ funciona como ahora.
+   - Marcá work/lab/scope.yaml con lab: true si no lo tiene ya.
+
+2. S43 queda PENDIENTE de mi verificación manual. Voy a correr el procedimiento de
+   docs/evidence/confirm-live.md yo mismo. Te aviso el resultado antes de que seas vos quien marque
+   el checklist como GO. Mientras tanto no asumas aprobación.
+
+3. S45 (Fase F) AUTORIZADA en paralelo, bajo S21a, sin cambios.
+
+4. Sugerencia no bloqueante para S42: si tenés margen en la Fase F, sumá un segundo vector de CVE
+   publicado (además de Log4Shell) como anclaje cruzado, dado que el score ahora sale directo en
+   reportes a programas reales. No es requisito para GO.
+
+Cuando tenga el resultado de mi prueba manual y confirmes el guardarraíl del punto 1, te doy la
+decisión final de GO/NO-GO por escrito. No caragues ningún scope real hasta esa confirmación.
+```

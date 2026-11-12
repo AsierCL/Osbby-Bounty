@@ -38,9 +38,11 @@ Implementado y calculando (S42). Límites conocidos, no deuda de cálculo:
   una batería de 10 scores publicados de CVE: el host no consulta NVD (S1). Si hace falta más
   cobertura, la vía es que el humano aporte vectores con su score publicado.
 
-## 5. Atafetas de test en la extensión (S43)
+## 5. Atafetas de test en la extensión (S43, cerrado en lo mecánico por S47)
 
 `GENTLE_BOUNTY_ALLOW_CONFIRM_STUB=1` + `GENTLE_BOUNTY_CONFIRM_TEST=yes|no` permiten responder la
-confirmación sin humano, y `GENTLE_BOUNTY_PRELOAD_SCOPE` carga un scope sin pausa. Son **solo para
-verificación**: la extensión loguea cada respuesta por stub, y **nunca se activan contra un programa
-real**. Con las dos variables ausentes, la sesión pregunta por la UI y, si no hay UI, responde "no".
+confirmación sin humano, y `GENTLE_BOUNTY_PRELOAD_SCOPE` carga un scope sin pausa.
+
+Desde S47 esto **no puede pasar en el camino normal**: el scope exige `lab: true|false`, el stub solo
+responde con `lab: true`, y un alcance real con el stub activo **se niega a cargar** dejando el error
+en `status.md`. Queda como atafeta de verificación, con dos variables y log en cada uso.

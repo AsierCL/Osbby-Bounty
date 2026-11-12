@@ -13,6 +13,7 @@ import { parseScope } from "../src/core/scope.ts";
 
 const SCOPE = `
 program: lab
+lab: true
 authorized_on: 2026-11-11
 in_scope:
   - acme.com

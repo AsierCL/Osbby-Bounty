@@ -18,7 +18,7 @@ test("no UI and no stub means no", async () => {
 	assert.equal(await resolution.confirm("¿dale?"), false);
 });
 
-test("the stub needs both environment variables", async () => {
+test("the stub needs both environment variables and a lab scope", async () => {
 	const onlyMode = resolveConfirm({ env: { GENTLE_BOUNTY_CONFIRM_TEST: "yes" } as NodeJS.ProcessEnv });
 	assert.equal(onlyMode.source, "none");
 	const onlyAllow = resolveConfirm({ env: { GENTLE_BOUNTY_ALLOW_CONFIRM_STUB: "1" } as NodeJS.ProcessEnv });
@@ -26,6 +26,7 @@ test("the stub needs both environment variables", async () => {
 	const both = resolveConfirm({
 		env: { GENTLE_BOUNTY_ALLOW_CONFIRM_STUB: "1", GENTLE_BOUNTY_CONFIRM_TEST: "yes" } as NodeJS.ProcessEnv,
 		uiConfirm: async () => false,
+		lab: true,
 	});
 	assert.equal(both.source, "stub-yes");
 	assert.equal(await both.confirm("¿dale?"), true);
@@ -34,6 +35,7 @@ test("the stub needs both environment variables", async () => {
 test("the stub can answer no too", async () => {
 	const resolution = resolveConfirm({
 		env: { GENTLE_BOUNTY_ALLOW_CONFIRM_STUB: "1", GENTLE_BOUNTY_CONFIRM_TEST: "no" } as NodeJS.ProcessEnv,
+		lab: true,
 	});
 	assert.equal(resolution.source, "stub-no");
 	assert.equal(await resolution.confirm("¿dale?"), false);
@@ -44,4 +46,17 @@ test("an unknown stub value falls back to the UI rule", async () => {
 		env: { GENTLE_BOUNTY_ALLOW_CONFIRM_STUB: "1", GENTLE_BOUNTY_CONFIRM_TEST: "maybe" } as NodeJS.ProcessEnv,
 	});
 	assert.equal(resolution.source, "none");
+});
+
+test("S47: the stub is refused outside a lab scope, and says so", async () => {
+	const env = { GENTLE_BOUNTY_ALLOW_CONFIRM_STUB: "1", GENTLE_BOUNTY_CONFIRM_TEST: "yes" } as NodeJS.ProcessEnv;
+	for (const lab of [false, undefined]) {
+		const resolution = resolveConfirm({ env, lab, uiConfirm: async () => false });
+		assert.equal(resolution.stubRequested, true);
+		assert.equal(resolution.source, "ui", "an explicit UI callback must win over a refused stub");
+		assert.equal(await resolution.confirm("¿dale?"), false, "the refused stub must never answer yes");
+	}
+	const noUi = resolveConfirm({ env, lab: false });
+	assert.equal(noUi.source, "none");
+	assert.equal(await noUi.confirm("¿dale?"), false);
 });

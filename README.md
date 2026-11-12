@@ -61,6 +61,9 @@ leen lo mismo.
   `bash` libre** (por ejemplo un agente de coding en el mismo workspace). Si conviven, la otra sesión
   puede `curl` y el gate no la ve. Es una condición de uso, no un control técnico.
 - `scope/` y `work/` nunca se commitean.
+- El scope declara `lab: true` (laboratorio propio) o `lab: false` (programa real). Es obligatorio: sin
+  ese campo el alcance no carga. Las atafetas de test de la confirmación solo funcionan con
+  `lab: true`; si están activas y el scope es real, la sesión se niega a cargar el alcance.
 - Las credenciales de cuentas de prueba viven en `.bounty/config.json` (gitignored) y se pasan
   directo a los argumentos. No hay vault ni alias.
 - **La redacción de credenciales está apagada por defecto** (`GENTLE_BOUNTY_REDACTION=on` para

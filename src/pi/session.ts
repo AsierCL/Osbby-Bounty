@@ -12,6 +12,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
 import { classifyDestructive } from "../core/destructive.ts";
+import { resolveConfirm } from "./confirm.ts";
 import { createBudget, type BudgetPolicy } from "./budget.ts";
 import { createStopController, type StopController } from "./stop.ts";
 import { createEvidenceStore, type EvidenceStore } from "../core/evidence.ts";
@@ -40,6 +41,8 @@ export interface ToolExecution {
 }
 
 export interface SessionDeps {
+	/** Injected environment, so the stub guardrail is testable without touching process.env. */
+	env?: NodeJS.ProcessEnv;
 	dns: DnsResolver;
 	readFile: (path: string) => Promise<string>;
 	runTool: (argv: string[]) => Promise<ToolExecution>;
@@ -145,6 +148,17 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				return { ok: false, text: `El alcance no parsea, así que no lo uso:\n- ${parsed.errors.join("\n- ")}` };
 			}
 
+			// S47: the confirmation stub is a test affordance. It only ever answers inside a lab, and a
+			// scope that is not declared as one refuses to load while the stub is requested.
+			const stub = resolveConfirm({ env: deps.env, lab: parsed.policy.lab });
+			if (stub.stubRequested && parsed.policy.lab !== true) {
+				const message =
+					"El stub de confirmación está activo y este scope no está marcado como laboratorio (lab: true). No cargo el alcance.";
+				await status.note(`scope rechazado: ${message}`);
+				await refresh("Corregí el scope o sacá las variables del stub.");
+				return { ok: false, text: message };
+			}
+
 			policy = parsed.policy;
 			scopePath = input.file;
 			limiter = createRateLimiter(
@@ -243,7 +257,8 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				});
 				await refresh("Esperando tu OK explícito para la acción destructiva.");
 				const question = `Esto puede romper algo (${classification.reason ?? "clasificada como destructiva"}): ${input.tool} ${input.args.join(" ")} contra ${input.target}. ¿Lo autorizás?`;
-				const approved = await (input.confirm ?? deps.confirm)(question);
+				const resolved = resolveConfirm({ env: deps.env, lab: current.lab, uiConfirm: input.confirm ?? deps.confirm });
+				const approved = await resolved.confirm(question);
 				if (!approved) {
 					return {
 						ok: false,

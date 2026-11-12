@@ -52,7 +52,7 @@ function boundaryMatch(host: string, ruleHost: string, wildcard: boolean): boole
 }
 
 function singleRulePolicy(rule: string, text: string): ScopePolicy | null {
-	const parsed = parseScope(`program: p\nin_scope:\n  - ${JSON.stringify(rule)}\n${text}`);
+	const parsed = parseScope(`program: p\nlab: true\nin_scope:\n  - ${JSON.stringify(rule)}\n${text}`);
 	return parsed.ok ? parsed.policy : null;
 }
 
@@ -85,7 +85,7 @@ test("P2: an out_of_scope match always wins", () => {
 		const policy = singleRulePolicy(`*.${canonical}`, "");
 		if (!policy) continue;
 		const withOut = parseScope(
-			`program: p\nin_scope:\n  - "*.${canonical}"\nout_of_scope:\n  - ${JSON.stringify(canonical)}\nlimits:\n  rate_rps: 5\n`,
+			`program: p\nlab: true\nin_scope:\n  - "*.${canonical}"\nout_of_scope:\n  - ${JSON.stringify(canonical)}\nlimits:\n  rate_rps: 5\n`,
 		);
 		if (!withOut.ok) continue;
 		const verdict = evaluate(withOut.policy, { host: canonical });
@@ -124,7 +124,7 @@ test("P4: an unknown key is always a parse error, whatever its shape", () => {
 	for (let iteration = 0; iteration < 300; iteration += 1) {
 		const key = `k${Math.floor(random() * 1000)}`;
 		if (KNOWN.has(key)) continue;
-		const parsed = parseScope(`program: p\nin_scope:\n  - acme.com\n${key}: 1\n`);
+		const parsed = parseScope(`program: p\nlab: true\nin_scope:\n  - acme.com\n${key}: 1\n`);
 		assert.equal(parsed.ok, false, `unknown key ${key} was accepted`);
 	}
 });
@@ -133,7 +133,7 @@ test("P5: every parsed rule has a canonical host and a usable pattern", () => {
 	const random = prng(0xfeed);
 	for (let iteration = 0; iteration < 300; iteration += 1) {
 		const rule = random() < 0.4 ? `*.${randomHost(random)}` : randomHost(random);
-		const parsed = parseScope(`program: p\nin_scope:\n  - ${JSON.stringify(rule)}\n`);
+		const parsed = parseScope(`program: p\nlab: true\nin_scope:\n  - ${JSON.stringify(rule)}\n`);
 		if (!parsed.ok) continue;
 		for (const candidate of parsed.policy.inScope) {
 			assert.equal(candidate.host, canonicalHost(candidate.host), `rule host not canonical: ${candidate.host}`);

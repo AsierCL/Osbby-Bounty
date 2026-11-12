@@ -43,7 +43,7 @@ async function scenario(answer: boolean) {
 	await writeFile(fake, `#!/bin/sh\necho called >> ${marker}\nexit 0\n`, { mode: 0o755 });
 	await writeFile(
 		join(dir, "scope.yaml"),
-		`program: lab\nauthorized_on: 2026-11-11\nin_scope:\n  - 127.0.0.1:3000\nlimits:\n  rate_rps: 5\n  allowed_req: []\n`.replace("  allowed_req: []\n", ""),
+		`program: lab\nlab: true\nauthorized_on: 2026-11-11\nin_scope:\n  - 127.0.0.1:3000\nlimits:\n  rate_rps: 5\n  allowed_req: []\n`.replace("  allowed_req: []\n", ""),
 		"utf8",
 	);
 

@@ -99,6 +99,24 @@ Riesgo real: **bajo pero no nulo**. Requiere que una tool descargue una wordlist
 esquema sin que nadie lo note. Está acá, junto al otro hueco, para que se lea con la misma
 gravedad y no como nota de informe.
 
+## Campo obligatorio `lab` (S47)
+
+El scope declara si el objetivo es un laboratorio propio o un programa real:
+
+```yaml
+program: lab
+lab: true          # true = laboratorio propio; false = programa real
+```
+
+Sin `lab` el scope **no carga** (falla cerrado, como todo lo demás). El valor solo puede ser
+`true` o `false`.
+
+Para qué sirve: las atafetas de test de la confirmación (`GENTLE_BOUNTY_ALLOW_CONFIRM_STUB` +
+`GENTLE_BOUNTY_CONFIRM_TEST`) **solo tienen efecto con `lab: true`**. Si están definidas y el scope
+es `lab: false`, la sesión **se niega a cargar el alcance** y lo deja escrito en `status.md`. La
+segunda barrera: aunque algo saltara esa puerta, `resolveConfirm` no deja que el stub responda fuera
+de un lab.
+
 ## Semántica de las reglas
 
 | Regla | Matchea | No matchea |

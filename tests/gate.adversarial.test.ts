@@ -14,6 +14,7 @@ import { gate } from "../src/core/gate.ts";
 
 const SCOPE = `
 program: lab
+lab: true
 authorized_on: 2026-11-01
 in_scope:
   - acme.com

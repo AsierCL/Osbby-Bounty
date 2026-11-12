@@ -38,6 +38,7 @@ async function harness(options: { confirm?: boolean } = {}): Promise<Harness> {
 	await writeFile(
 		scopePath,
 		`program: lab
+lab: true
 authorized_on: 2026-11-11
 in_scope:
   - 127.0.0.1:${lab.port}

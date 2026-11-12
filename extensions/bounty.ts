@@ -15,7 +15,6 @@ import { isIP } from "node:net";
 
 import { createSession, type ProgramSession, type ToolExecution } from "../src/pi/session.ts";
 import { loadGlobalConfig, type GlobalConfig } from "../src/core/config.ts";
-import { resolveConfirm } from "../src/pi/confirm.ts";
 import type { BountyPhase } from "../src/core/status.ts";
 import type { RedactionMode } from "../src/core/redact.ts";
 
@@ -171,14 +170,12 @@ export default function bountyExtension(pi: PiLike): void {
 		async execute(_toolCallId, params, _signal, _onUpdate, context) {
 			const session = await sessionFor(String(params.program));
 			// Verified in docs/extensions.md:84 and :197 — `await ctx.ui.confirm(title, message)`.
+			// The stub decision lives in the session, which knows whether the scope is a lab (S47).
 			const ui = context?.ui;
-			const resolved = resolveConfirm({
-				uiConfirm:
-					typeof ui?.confirm === "function"
-						? async (question: string) => Boolean(await ui.confirm("Confirmar acción destructiva", question))
-						: undefined,
-			});
-			const confirm = resolved.confirm;
+			const confirm =
+				typeof ui?.confirm === "function"
+					? async (question: string) => Boolean(await ui.confirm("Confirmar acción destructiva", question))
+					: undefined;
 			const result = await session.run({
 				tool: String(params.tool),
 				args: Array.isArray(params.args) ? params.args.map(String) : [],

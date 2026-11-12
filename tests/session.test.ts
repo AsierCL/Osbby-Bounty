@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { createSession, type ProgramSession, type SessionDeps } from "../src/pi/session.ts";
 
 const SCOPE_NO_FORBIDDEN = `program: lab
+lab: true
 authorized_on: 2026-11-11
 in_scope:
   - 127.0.0.1:3000
@@ -22,6 +23,7 @@ limits:
 `;
 
 const SCOPE = `program: lab
+lab: true
 authorized_on: 2026-11-11
 in_scope:
   - 127.0.0.1:3000
@@ -107,7 +109,7 @@ test("confirming the scope clears the pending item", async () => {
 });
 
 test("a scope that does not parse is refused and leaves the session unusable", async () => {
-	const h = await harness({ scope: "program: lab\nin_scope:\n  - \"*\"\n" });
+	const h = await harness({ scope: "program: lab\nlab: true\nin_scope:\n  - \"*\"\n" });
 	try {
 		const result = await h.session.scope({ file: join(h.dir, "scope.yaml") });
 		assert.equal(result.ok, false);
