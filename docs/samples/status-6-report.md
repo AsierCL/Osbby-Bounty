@@ -18,4 +18,4 @@ Nada pendiente: sigo solo.
 
 ## Qué sigue
 
-puntuar severidad y descartar duplicados
+El reporte queda listo para que lo revises y lo mandes vos.

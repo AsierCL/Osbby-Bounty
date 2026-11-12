@@ -18,4 +18,4 @@ Nada pendiente: sigo solo.
 
 ## Qué sigue
 
-probar el acceso a facturas de otro usuario
+Si se confirma, lo paso a triage y escribo el reporte.

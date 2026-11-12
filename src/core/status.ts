@@ -163,7 +163,9 @@ export function createStatusStore(options: { workDir: string; program: string; n
 		async setPhase(phase, nextStep) {
 			const state = await this.read();
 			state.phase = phase;
-			if (nextStep !== undefined) state.nextStep = nextStep;
+			// A phase change invalidates the previous phase's "what next": keeping it is how a stale
+			// line made the report phase say "score severity" (found while judging the samples, S39).
+			state.nextStep = nextStep ?? "";
 			await this.write(state);
 			return state;
 		},
