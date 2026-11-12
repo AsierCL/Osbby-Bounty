@@ -1164,3 +1164,24 @@ resultado de la prueba manual. Registrá esto como S47 en adelante.
 Cuando tenga el resultado de mi prueba manual y confirmes el guardarraíl del punto 1, te doy la
 decisión final de GO/NO-GO por escrito. No caragues ningún scope real hasta esa confirmación.
 ```
+
+### L17 — S47 cerrado, S49 parcial (Fase F), S50 bloqueado
+
+**S47 — guardarraíl del confirm-stub: CERRADO.** `lab: true|false` es campo obligatorio del scope
+(sin él no parsea). El stub solo responde con `lab: true`; si las variables están definidas y el scope
+no es lab, `session.scope()` **se niega a cargar el alcance**, lo escribe en `status.md` y no deja
+policy, así que después nada puede ejecutarse. Segunda barrera en `resolveConfirm` (no responde fuera
+de lab). `resolveConfirm` se movió a la sesión, que es la única que conoce el scope. `work/lab/scope.yaml`
+marcado `lab: true`. 6 tests nuevos. **247 tests, 0 fallos.** Commit `5283d69`.
+
+**S48 — S43 sigue pendiente del humano.** No lo marco verde ni asumo aprobación.
+
+**S49 — Fase F: parcial.** Clonados en solo lectura `shuvonsec/claude-bug-bounty` (MIT, con
+scope checker y tests de falsos positivos; su README instala con `curl | sh`, prohibido por S21a) y
+`H-mmer/pentest-agents` (sin licencia ⇒ nada copiable; sí como referencia de diseño). Los nombres
+`vavkamil/Claude-BugHunter` y `elementalsouls/Claude-Bug-Bounty` dan 404: necesito la URL exacta, no
+voy a adivinar owners. Detalle en `docs/prior-art.md`.
+
+**S50 — segundo anclaje CVSS: bloqueado.** Necesito un par vector+score **publicado** para anclarlo.
+El host no consulta NVD (S1) y no voy a inventar un score de memoria. Con que me pases un vector con
+su score publicado, lo agrego en un minuto.

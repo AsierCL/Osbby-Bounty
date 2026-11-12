@@ -25,6 +25,51 @@ acá.
 |---|---|---|
 | `src/core/cvss-data.ts` | tablas de lookup, severidad máxima y vectores máximos compuestos | ~6 KB |
 
+## Revisión de Fase F (S45/S49) — solo lectura, nada incorporado
+
+Clonados con `git clone --depth 1 --no-recurse-submodules -c core.hooksPath=/dev/null` en
+`../prior-art/`, **sin ejecutar nada** de lo clonado (ni install, ni tests, ni scripts).
+
+### `shuvonsec/claude-bug-bounty` — MIT
+
+- **Qué cubre**: playbooks de caza (26 `SKILL.md`, 209 `.md`), comandos, un MCP server propio en Go y
+  un conjunto de tests que incluye `test_scope_checker.py`, `test_agent_dispatcher_scope.py` y
+  `test_false_positives.py`.
+- **Enforcement de scope / cadena de evidencia**: tiene **verificación de scope en código** (tests
+  dedicados y selector de targets) y tests de falsos positivos. **No** vi cadena de hashes ni
+  puntero de cabeza: la evidencia es archivos, no una cadena verificable.
+- **Riesgos**: el `README` incluye `curl -fsSL https://ollama.ai/install.sh | sh`. Es exactamente lo
+  que S3/S21a prohíben ejecutar; si alguien sigue el README a ciegas, instala un binario con `| sh`.
+  El resto de los hits de grep son contenido técnico (payloads, writeups), no instrucciones al agente.
+- **Qué adaptar**: la lista de límites duros de `rules/hunting.md` es casi idéntica a nuestras dos
+  líneas rojas y sirve como **validación externa** del diseño. Los nombres de clases y la estructura
+  de skills (una por clase de vulnerabilidad) son buen molde para nuestras skills propias.
+- **Qué NO adaptar**: sus scripts y su MCP server (no los necesitamos: nuestro gate es el chokepoint),
+  y nada de su prosa sin atribución MIT.
+
+### `H-mmer/pentest-agents` — **sin licencia** (NOASSERTION)
+
+- **Qué cubre**: el más grande de los cuatro (306 `SKILL.md`, 567 `.md`, 75 scripts), con hooks,
+  `mcp-bounty-server`, `mcp-writeup-server`, `rag-builder` y `rules/`.
+- **Enforcement de scope / cadena de evidencia**: sí hay enforcement real, con tests
+  (`tests/test_scope_check.py`, `tests/test_autopilot_gate.py`) y modelos en `mcp-bounty-server`.
+  Cadena de evidencia verificable: **no la vi**.
+- **Riesgos**: **sin archivo de licencia**. Sin licencia, el valor por defecto es "todos los derechos
+  reservados": **no se copia ni un fragmento**. Además, 75 scripts y hooks ajenos son superficie de
+  supply chain que no vamos a incorporar.
+- **Qué adaptar**: **nada de código**. Sirve como referencia de diseño: el concepto de "autopilot
+  gate" es el mismo que nuestro modo automático con pausas, y confirma que la separación
+  scope-check / ejecución es la forma correcta.
+- **Qué NO adaptar**: todo lo demás, por licencia.
+
+### No resueltos (necesito la URL exacta)
+
+- `vavkamil/Claude-BugHunter` → **404**, no existe o el nombre/owner es otro.
+- `elementalsouls/Claude-Bug-Bounty` → **404**, idem.
+
+S21a prohíbe ampliar la lista de repos sin OK, así que no voy a adivinar owners. Con la URL exacta,
+los reviso igual que los otros dos.
+
 ## Revisado pero no incorporado
 
 ### `trailofbits/skills` — verificado en Fase 0 (solo lectura)
