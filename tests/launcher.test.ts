@@ -50,6 +50,10 @@ test("a probe extension can be added for the live tool inspection", () => {
 	}, []);
 	assert.equal(entries.length, 2);
 	assert.match(entries[1], /tools-probe\.ts$/);
+	// The output must never be the extension path: an earlier version did exactly that and the probe
+	// overwrote its own source during a live smoke run.
+	assert.match(launch.env.GENTLE_BOUNTY_PROBE_FILE, /work\/lab\/probe-tools\.json$/);
+	assert.notEqual(launch.env.GENTLE_BOUNTY_PROBE_FILE, entries[1]);
 });
 
 test("an approved MCP list omits --no-mcp, because that is the operator's decision", () => {

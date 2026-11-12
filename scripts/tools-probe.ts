@@ -1,7 +1,10 @@
 /**
  * Live tool-list probe (S34). Loaded with the main-session launcher; on the first model turn it writes
- * the tools Pi actually enabled to GENTLE_BOUNTY_PROBE_FILE. The report inspects that file instead of
- * asking the model what tools it has.
+ * the tools Pi actually enabled to GENTLE_BOUNTY_PROBE_FILE.
+ *
+ * Output path is always work/<program>/probe-tools.json. An earlier launcher version pointed the
+ * output at this file and the probe overwrote its own source during a smoke run; the launcher now
+ * refuses that path and asserts the separation.
  */
 import { writeFileSync } from "node:fs";
 

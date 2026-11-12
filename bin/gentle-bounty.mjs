@@ -47,7 +47,11 @@ export function buildLaunch({ program, root, probeFile, approvedMcp, extra = [] 
 		args.push("--no-mcp");
 	}
 	args.push("-ne", "-e", join(root, "extensions", "bounty.ts"));
-	if (probeFile) args.push("-e", resolve(probeFile));
+	if (probeFile) {
+		const probeTarget = join(workDir, "probe-tools.json");
+		if (resolve(probeFile) === probeTarget) throw new Error("the probe output path must not be the probe extension itself");
+		args.push("-e", resolve(probeFile));
+	}
 	args.push("--tools", MAIN_SESSION_TOOLS.join(","), ...extra);
 	return {
 		command: "pi",
@@ -56,7 +60,7 @@ export function buildLaunch({ program, root, probeFile, approvedMcp, extra = [] 
 		env: {
 			GENTLE_BOUNTY_ROOT: process.cwd(),
 			GENTLE_BOUNTY_PROGRAM: program,
-			...(probeFile ? { GENTLE_BOUNTY_PROBE_FILE: resolve(probeFile) } : {}),
+			...(probeFile ? { GENTLE_BOUNTY_PROBE_FILE: join(workDir, "probe-tools.json") } : {}),
 		},
 	};
 }

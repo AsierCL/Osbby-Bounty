@@ -1,0 +1,3 @@
+#!/bin/sh
+# Extension-less entry point: `bin/gentle-bounty` is what the docs and the human use.
+exec node "$(dirname "$0")/gentle-bounty.mjs" "$@"
