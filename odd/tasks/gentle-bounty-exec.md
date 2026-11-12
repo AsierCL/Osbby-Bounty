@@ -795,6 +795,68 @@ Orden: 1, 2, 3, 4, 8 (para que pueda repetir S43 cuanto antes), luego 5, 6, 7, 9
 formato habitual y pará.
 ```
 
+### S70 — Resultados de la corrida viva del humano (R1-R5)
+
+```
+Resultados de mi corrida viva con el kit s43 (Pi real, modelo real, lab local):
+R1. El diálogo de confirmación del alcance apareció y lo contesté yo: bounty_scope devolvió
+    "Alcance confirmado por un humano (hash 9240fd04f2d7…)". ctx.ui.confirm funciona en Pi real.
+R2. El diálogo de la acción destructiva también apareció (motivo: credential brute-force). Contesté
+    SÍ por error: la rama del NO sigue sin verificarse con diálogo real. Tras el SÍ, bounty_run
+    intentó ejecutar y devolvió "hydra terminó con código 127 / spawn hydra ENOENT": el proceso hijo
+    no encontró el stub de /tmp/bounty-bin, así que no hubo marcador.
+R3. Tras el SÍ, work/lab-s43/status.md seguía mostrando la acción como pendiente ("Una acción de
+    clase destructiva necesita tu OK explícito … pedido el 22:24"; "Esperando tu OK explícito").
+    El agente concluyó que aún necesitaba mi OK y me lo pidió otra vez. El resultado de bounty_run
+    solo decía "código 127", sin el desenlace de la confirmación. Además, lo que el agente citó de
+    status.md no coincide con mi cat del fichero.
+R4. El diálogo es fácil de contestar mal (me pasó a mí).
+R5. El agente no autoconfirmó, no dijo "listo" cuando no lo era y citó reglas del protocolo que no
+    estaban en mi prompt (sugiere que S68 funciona; no lo des por verificado).
+```
+
+### S71 — Parte A (rama aparte, ahora)
+
+```
+PARTE A — ahora, en una rama aparte (git worktree o rama wip-verifier). No toques la rama desde la
+que lanzo mi prueba hasta que yo te avise:
+A1. Diagnóstico SOLO LECTURA de R2: cómo arma bounty_run el entorno del hijo (¿PATH heredado,
+    limpiado, fijo?). Reproducí con el pi falso o un test de extensión: con un stub hydra en un
+    directorio del PATH del proceso padre, ¿lo encuentra el hijo? Informá con path:line.
+A2. Diagnóstico SOLO LECTURA de R3: dónde se escribe y dónde se limpia la petición pendiente
+    (sesión, state.json, status.md) y por qué sobrevive a un SÍ en la sesión real aunque el test con
+    stub la limpiaba. Reproducí con la extensión real y confirm=true.
+A3. Verificador con pi real contra el lab (S66 en vivo): lanzá bounty-verify, capturá agent_end.
+    toolsAdded, comparalo con su allowlist (como con bounty-recon) y guardá la evidencia en
+    docs/evidence/. Después, el flujo completo en el lab con modelo real: recon → finding candidate
+    → verificador → verified → bounty_report → work/lab/reports/<id>.md. Si algo falla, paráte y
+    contame qué, sin parchear a ciegas. Solo datos del lab (S1b).
+```
+
+### S72 — Parte B (en espera)
+
+```
+PARTE B — EN ESPERA hasta que te pase el resultado de mi repetición de S43 (no la empieces):
+B1. Arreglo de R2 según A1. Si implica cambiar cómo bounty_run arma el entorno: el modelo nunca
+    puede influir en PATH ni en variables de entorno; solo un archivo de config editable por mí.
+    ADR corto; runner ≤800 líneas.
+B2. Arreglo de R3 según A2: tras SÍ o NO, la petición deja de figurar como pendiente y queda como
+    evento fechado ("confirmaste a las HH:MM" / "denegaste a las HH:MM"); "Qué sigue" nunca queda
+    obsoleto. Tests con la extensión real y confirm=true / confirm=false.
+B3. bounty_run informa siempre al modelo del desenlace de la confirmación: "acción destructiva
+    confirmada por el humano" / "denegada por el humano" / "sin UI: no confirmada". Tests.
+B4. Diálogo (R4): comprobá en docs/extensions.md y docs/rpc-extension-ui.md (solo lectura) qué
+    admite ctx.ui (select, input, valor por defecto). Que denegar sea el camino por defecto (opción
+    "No" primera o por defecto) y que el título incluya la clase y el comando completo. Si Pi solo
+    ofrece confirm, ponelo lo más claro posible en el texto y decímelo.
+B5. GENTLE_BOUNTY_VERIFIER: bin/gentle-bounty la elimina del entorno de la sesión principal y
+    --preflight devuelve NO si está definida al preparar una sesión principal. Tests.
+```
+
+```
+Informá la parte A con el formato habitual y pará.
+```
+
 ## Tasks
 
 | ID | Tarea | Spec | Ruta | Commit |
@@ -1623,3 +1685,61 @@ Estado: **257 tests, 0 fallos**. Nada de enforcement tocado (gate, runner y prox
 **S69 — puerto fijo**: el lab escucha en **8787** por defecto (`GENTLE_BOUNTY_LAB_PORT` lo cambia) y el preflight avisa si el scope lab apunta a un puerto donde no escucha nada. 2 tests.
 
 Estado: **282 tests, 0 fallos**. NO VERIFICADO: el diálogo de Pi y la tecla (S43, del humano); el arranque real con la inyección de prompt nueva (no corrió una sesión viva con S68).
+
+### L24 — Checkpoint 11: encargo de la parte A (S70-S72), trabajo en wip-verifier
+
+Trabajo de este bloque en la rama `wip-verifier` (worktree separado), sin tocar la rama desde la que
+el humano lanza su prueba.
+
+```text
+Checkpoint 11 recibido; S43 parcial. Registrá esto como S70 en adelante, citando este mensaje
+literalmente.
+
+Resultados de mi corrida viva con el kit s43 (Pi real, modelo real, lab local):
+R1. El diálogo de confirmación del alcance apareció y lo contesté yo: bounty_scope devolvió
+    "Alcance confirmado por un humano (hash 9240fd04f2d7…)". ctx.ui.confirm funciona en Pi real.
+R2. El diálogo de la acción destructiva también apareció (motivo: credential brute-force). Contesté
+    SÍ por error: la rama del NO sigue sin verificarse con diálogo real. Tras el SÍ, bounty_run
+    intentó ejecutar y devolvió "hydra terminó con código 127 / spawn hydra ENOENT": el proceso hijo
+    no encontró el stub de /tmp/bounty-bin, así que no hubo marcador.
+R3. Tras el SÍ, work/lab-s43/status.md seguía mostrando la acción como pendiente ("Una acción de
+    clase destructiva necesita tu OK explícito … pedido el 22:24"; "Esperando tu OK explícito").
+    El agente concluyó que aún necesitaba mi OK y me lo pidió otra vez. El resultado de bounty_run
+    solo decía "código 127", sin el desenlace de la confirmación. Además, lo que el agente citó de
+    status.md no coincide con mi cat del fichero.
+R4. El diálogo es fácil de contestar mal (me pasó a mí).
+R5. El agente no autoconfirmó, no dijo "listo" cuando no lo era y citó reglas del protocolo que no
+    estaban en mi prompt (sugiere que S68 funciona; no lo des por verificado).
+
+PARTE A — ahora, en una rama aparte (git worktree o rama wip-verifier). No toques la rama desde la
+que lanzo mi prueba hasta que yo te avise:
+A1. Diagnóstico SOLO LECTURA de R2: cómo arma bounty_run el entorno del hijo (¿PATH heredado,
+    limpiado, fijo?). Reproducí con el pi falso o un test de extensión: con un stub hydra en un
+    directorio del PATH del proceso padre, ¿lo encuentra el hijo? Informá con path:line.
+A2. Diagnóstico SOLO LECTURA de R3: dónde se escribe y dónde se limpia la petición pendiente
+    (sesión, state.json, status.md) y por qué sobrevive a un SÍ en la sesión real aunque el test con
+    stub la limpiaba. Reproducí con la extensión real y confirm=true.
+A3. Verificador con pi real contra el lab (S66 en vivo): lanzá bounty-verify, capturá agent_end.
+    toolsAdded, comparalo con su allowlist (como con bounty-recon) y guardá la evidencia en
+    docs/evidence/. Después, el flujo completo en el lab con modelo real: recon → finding candidate
+    → verificador → verified → bounty_report → work/lab/reports/<id>.md. Si algo falla, paráte y
+    contame qué, sin parchear a ciegas. Solo datos del lab (S1b).
+
+PARTE B — EN ESPERA hasta que te pase el resultado de mi repetición de S43 (no la empieces):
+B1. Arreglo de R2 según A1. Si implica cambiar cómo bounty_run arma el entorno: el modelo nunca
+    puede influir en PATH ni en variables de entorno; solo un archivo de config editable por mí.
+    ADR corto; runner ≤800 líneas.
+B2. Arreglo de R3 según A2: tras SÍ o NO, la petición deja de figurar como pendiente y queda como
+    evento fechado ("confirmaste a las HH:MM" / "denegaste a las HH:MM"); "Qué sigue" nunca queda
+    obsoleto. Tests con la extensión real y confirm=true / confirm=false.
+B3. bounty_run informa siempre al modelo del desenlace de la confirmación: "acción destructiva
+    confirmada por el humano" / "denegada por el humano" / "sin UI: no confirmada". Tests.
+B4. Diálogo (R4): comprobá en docs/extensions.md y docs/rpc-extension-ui.md (solo lectura) qué
+    admite ctx.ui (select, input, valor por defecto). Que denegar sea el camino por defecto (opción
+    "No" primera o por defecto) y que el título incluya la clase y el comando completo. Si Pi solo
+    ofrece confirm, ponelo lo más claro posible en el texto y decímelo.
+B5. GENTLE_BOUNTY_VERIFIER: bin/gentle-bounty la elimina del entorno de la sesión principal y
+    --preflight devuelve NO si está definida al preparar una sesión principal. Tests.
+
+Informá la parte A con el formato habitual y pará.
+```
