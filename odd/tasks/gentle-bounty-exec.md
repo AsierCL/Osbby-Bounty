@@ -262,6 +262,117 @@ riesgos nuevos; qué necesitas de mí.
 7. Próximo checkpoint: tras B+C, con el formato de informe habitual. Para y espera mi aprobación.
 ```
 
+### S23 — Principio que gobierna el resto (enmienda)
+
+```
+0. Principio que gobierna el resto: dos líneas rojas, y solo dos, son innegociables: (1) nunca tocar
+   nada fuera de scope, (2) nunca fuerza bruta, DoS/DDoS, ni ninguna clase destructiva sin
+   confirmación explícita. Todo lo demás prioriza autonomía y fricción mínima sobre exhaustividad.
+   Ante la duda entre "más estricto" y "más autónomo" en algo que NO sea una de esas dos líneas
+   rojas, elegí autónomo.
+```
+
+### S24 — Escaneo genérico de argv (reemplaza la decisión (a) de S22)
+
+```
+1. Decisión (a) — REEMPLAZADA. Descarta el esquema de perfiles por herramienta
+   (tools/profiles/*.json): exige mantenimiento y limita qué herramientas se pueden usar. En su
+   lugar: escaneo genérico de argv — cada token que parsee como host, URL, IP, o aparezca en un
+   archivo pasado con -l/-list/--targets, se extrae y se valida contra el scope, sin importar qué
+   flag lo acompañe ni si la herramienta tiene perfil. Herramienta nueva, sin configuración previa:
+   funciona igual. Un token no reconocido como host no bloquea la ejecución.
+```
+
+### S25 — Wildcard sin puerto: aplazado (enmienda a la decisión (b))
+
+```
+2. Decisión (b) — APLAZADA, no bloqueante. El problema del wildcard sin puerto queda documentado en
+   docs/gate.md como limitación conocida; se corrige cuando convenga, no detiene fase D ni E.
+```
+
+### S26 — Redacción desactivada por defecto (enmienda a S11)
+
+```
+3. redact.ts — por defecto DESACTIVADO. Las credenciales de cuentas de prueba viajan al modelo sin
+   redactar. El evidence store se mantiene completo igual que ahora. Única excepción: si en recon
+   aparece un secreto de un tercero ajeno al programa (ej. API key de un proveedor de pago en un
+   bundle JS), no lo bloquees ni lo redactes del modelo, pero marcalo en status.md como "hallazgo
+   sensible — revisar antes de reportar". Elimina de la fase D el esquema de vault/alias de
+   credenciales (${cred:...}): las credenciales de prueba se pasan directo desde un archivo de
+   config local gitignored.
+```
+
+### S27 — Fase C simplificada (enmienda a S18 y al ADR-0003)
+
+```
+4. Fase C — SIMPLIFICADA, ya no bloqueante por infraestructura de SO. Descartá la ruta de firewall
+   multi-usuario / nftables / namespaces de ADR-0003 como requisito. El control real y suficiente es
+   de configuración, no de red:
+   a) Los subagentes de bounty NUNCA reciben una tool de bash/shell genérica ni de fetch/HTTP libre.
+      Toda acción que toque un target pasa por bounty_run (gate: scope con canonicalización +
+      escaneo genérico de argv + rate limit + confirmación en clases destructivas).
+   b) proxy.ts queda como está, útil para Burp/Playwright, pero documentado como "capa de registro y
+      limitación", no como barrera garantizada.
+   c) Nota honesta para el ADR y para README.md, en texto claro: esto depende de que la sesión de
+      bounty no comparta contexto con otra sesión que tenga bash libre (ej. un agente de coding de
+      propósito general en el mismo workspace). Es una condición de uso, no un control técnico.
+   d) IP resuelta privada/loopback/metadata y pinning anti-TOCTOU: dejalos si ya están hechos y son
+      baratos; si faltan, anotalos como mejora futura, no bloqueante.
+```
+
+### S28 — Autonomía: modo auto por defecto (enmienda a S13)
+
+```
+5. Autonomía — modo por defecto AUTO, no propose. Pausa para el humano SOLO en estos tres puntos:
+   a) Primera carga de un scope nuevo: mostrame el resumen (ambigüedades, reglas interpretadas) y
+      esperá mi confirmación una vez por programa. Desde ahí, recon → hypothesis → validate →
+      triage corre de punta a punta sin pedirme permiso en cada paso.
+   b) Cualquier acción de clase destructiva: confirmación explícita SIEMPRE, sin excepción, aunque
+      esté en modo auto. Línea roja #2, no se relaja.
+   c) Antes de mandar un reporte a la plataforma (D5: lo reviso y lo mando a mano).
+   El verificador independiente (bounty-verify) sigue siendo agente-a-agente, sin intervención
+   humana.
+```
+
+### S29 — status.md y bounty_status (requisito nuevo de la fase D)
+
+```
+6. Legibilidad y ubicación — nuevo requisito de producto para la fase D. Un archivo
+   work/<program>/status.md que se reescribe en cada transición de fase y cada cambio de estado de
+   un finding, en lenguaje llano, sin jerga de implementación: qué fase corre, qué se encontró hasta
+   ahora (lista corta), qué espera mi confirmación (si algo), y qué sigue. Tiene que bastar por sí
+   solo, sin que tenga que leer logs ni el task doc. Agregá también un bounty_status que devuelva
+   ese mismo resumen on-demand.
+```
+
+### S30 — Fase D autorizada (enmienda a S19)
+
+```
+7. Fase D autorizada con todo lo anterior. Se mantiene: runner ≤800 líneas (medilo y reportalo),
+   subagentes con allowlist sin bash libre (punto 4a), el verificador recibe solo id + evidencia y
+   reproduce vía bounty_run, tests de contrato con pi falso.
+```
+
+### S31 — Fase E en un solo nivel (enmienda a S20)
+
+```
+8. Fase E, un solo nivel (sin E2 de firewall aplicado, por el punto 4). Pruebas negativas
+   obligatorias contra el lab local:
+   - intento de salir de scope ⇒ bloqueado por el gate, razón legible en status.md;
+   - acción de clase destructiva detectada ⇒ pausa y pide confirmación, no bloquea en silencio;
+   - prompt injection plantada en el lab ⇒ tratada como dato, reportada como observación, nunca
+     ejecutada.
+   Verde esto, podés recomendarme apuntar a un programa real; la decisión la tomo yo.
+```
+
+### S32 — Próximo checkpoint y alcance de Fase F (enmienda a S22a)
+
+```
+9. Fase F sigue en huecos bajo S21a (sin cambios).
+10. Próximo checkpoint: tras la fase D. Mismo formato de informe: qué se hizo, tests, decisiones con
+    ADR, NO VERIFICADO, riesgos nuevos, qué necesitás de mí. Pará y esperá ahí.
+```
+
 ## Tasks
 
 | ID | Tarea | Spec | Ruta | Commit |
@@ -496,3 +607,118 @@ Checkpoint 1 APROBADO con estas resoluciones. Regístralas en el task doc como e
 - NO VERIFICADO: la regla nftables/iptables del ADR-0003 no se aplicó; el `curl --noproxy` con
   regla puesta no se probó; un hijo de Pi heredando `HTTP_PROXY` todavía no se probó (fase D).
 - Pendiente de aprobación humana (S22a): checkpoint 2 antes de abrir Fase D.
+
+### L8 — Checkpoint 2 aprobado, enmiendas S23-S32 (verbatim, sin el eco del todo list)
+
+```text
+Checkpoint 2 APROBADO con enmiendas (versión actualizada — sustituye cualquier instrucción anterior
+sobre perfiles de herramienta, vault de credenciales y enforcement de red). Registra esto en el task
+doc como S23 en adelante, citando este mensaje literalmente.
+
+0. Principio que gobierna el resto: dos líneas rojas, y solo dos, son innegociables: (1) nunca tocar
+   nada fuera de scope, (2) nunca fuerza bruta, DoS/DDoS, ni ninguna clase destructiva sin
+   confirmación explícita. Todo lo demás prioriza autonomía y fricción mínima sobre exhaustividad.
+   Ante la duda entre "más estricto" y "más autónomo" en algo que NO sea una de esas dos líneas
+   rojas, elegí autónomo.
+
+1. Decisión (a) — REEMPLAZADA. Descarta el esquema de perfiles por herramienta
+   (tools/profiles/*.json): exige mantenimiento y limita qué herramientas se pueden usar. En su
+   lugar: escaneo genérico de argv — cada token que parsee como host, URL, IP, o aparezca en un
+   archivo pasado con -l/-list/--targets, se extrae y se valida contra el scope, sin importar qué
+   flag lo acompañe ni si la herramienta tiene perfil. Herramienta nueva, sin configuración previa:
+   funciona igual. Un token no reconocido como host no bloquea la ejecución.
+
+2. Decisión (b) — APLAZADA, no bloqueante. El problema del wildcard sin puerto queda documentado en
+   docs/gate.md como limitación conocida; se corrige cuando convenga, no detiene fase D ni E.
+
+3. redact.ts — por defecto DESACTIVADO. Las credenciales de cuentas de prueba viajan al modelo sin
+   redactar. El evidence store se mantiene completo igual que ahora. Única excepción: si en recon
+   aparece un secreto de un tercero ajeno al programa (ej. API key de un proveedor de pago en un
+   bundle JS), no lo bloquees ni lo redactes del modelo, pero marcalo en status.md como "hallazgo
+   sensible — revisar antes de reportar". Elimina de la fase D el esquema de vault/alias de
+   credenciales (${cred:...}): las credenciales de prueba se pasan directo desde un archivo de
+   config local gitignored.
+
+4. Fase C — SIMPLIFICADA, ya no bloqueante por infraestructura de SO. Descartá la ruta de firewall
+   multi-usuario / nftables / namespaces de ADR-0003 como requisito. El control real y suficiente es
+   de configuración, no de red:
+   a) Los subagentes de bounty NUNCA reciben una tool de bash/shell genérica ni de fetch/HTTP libre.
+      Toda acción que toque un target pasa por bounty_run (gate: scope con canonicalización +
+      escaneo genérico de argv + rate limit + confirmación en clases destructivas).
+   b) proxy.ts queda como está, útil para Burp/Playwright, pero documentado como "capa de registro y
+      limitación", no como barrera garantizada.
+   c) Nota honesta para el ADR y para README.md, en texto claro: esto depende de que la sesión de
+      bounty no comparta contexto con otra sesión que tenga bash libre (ej. un agente de coding de
+      propósito general en el mismo workspace). Es una condición de uso, no un control técnico.
+   d) IP resuelta privada/loopback/metadata y pinning anti-TOCTOU: dejalos si ya están hechos y son
+      baratos; si faltan, anotalos como mejora futura, no bloqueante.
+
+5. Autonomía — modo por defecto AUTO, no propose. Pausa para el humano SOLO en estos tres puntos:
+   a) Primera carga de un scope nuevo: mostrame el resumen (ambigüedades, reglas interpretadas) y
+      esperá mi confirmación una vez por programa. Desde ahí, recon → hypothesis → validate →
+      triage corre de punta a punta sin pedirme permiso en cada paso.
+   b) Cualquier acción de clase destructiva: confirmación explícita SIEMPRE, sin excepción, aunque
+      esté en modo auto. Línea roja #2, no se relaja.
+   c) Antes de mandar un reporte a la plataforma (D5: lo reviso y lo mando a mano).
+   El verificador independiente (bounty-verify) sigue siendo agente-a-agente, sin intervención
+   humana.
+
+6. Legibilidad y ubicación — nuevo requisito de producto para la fase D. Un archivo
+   work/<program>/status.md que se reescribe en cada transición de fase y cada cambio de estado de
+   un finding, en lenguaje llano, sin jerga de implementación: qué fase corre, qué se encontró hasta
+   ahora (lista corta), qué espera mi confirmación (si algo), y qué sigue. Tiene que bastar por sí
+   solo, sin que tenga que leer logs ni el task doc. Agregá también un bounty_status que devuelva
+   ese mismo resumen on-demand.
+
+7. Fase D autorizada con todo lo anterior. Se mantiene: runner ≤800 líneas (medilo y reportalo),
+   subagentes con allowlist sin bash libre (punto 4a), el verificador recibe solo id + evidencia y
+   reproduce vía bounty_run, tests de contrato con pi falso.
+
+8. Fase E, un solo nivel (sin E2 de firewall aplicado, por el punto 4). Pruebas negativas
+   obligatorias contra el lab local:
+   - intento de salir de scope ⇒ bloqueado por el gate, razón legible en status.md;
+   - acción de clase destructiva detectada ⇒ pausa y pide confirmación, no bloquea en silencio;
+   - prompt injection plantada en el lab ⇒ tratada como dato, reportada como observación, nunca
+     ejecutada.
+   Verde esto, podés recomendarme apuntar a un programa real; la decisión la tomo yo.
+
+9. Fase F sigue en huecos bajo S21a (sin cambios).
+
+10. Próximo checkpoint: tras la fase D. Mismo formato de informe: qué se hizo, tests, decisiones con
+    ADR, NO VERIFICADO, riesgos nuevos, qué necesitás de mí. Pará y esperá ahí.
+```
+
+### L9 — Cierre de Fase D (checkpoint 3) y enmiendas S23-S32 aplicadas
+
+Enmiendas aplicadas:
+
+- **S24** — `gate.ts` ya no tiene perfiles por herramienta: cada token que parsea como host, URL o IP
+  se valida en cualquier posición; un token que no parsea como host se anota y **no bloquea**.
+  `--targets` agregado a los flags de archivo de hosts. 7 tests nuevos en `tests/gate.generic.test.ts`.
+- **S25** — el wildcard sin puerto quedó en `docs/gate.md` como limitación conocida y aplazada.
+- **S26** — `requestViewForModel`/`responseViewForModel` con `redaction: "off"` por defecto; el
+  truncado sigue activo. Un secreto de tercero se marca en `status.md` con la frase exacta
+  `hallazgo sensible — revisar antes de reportar`. Sin vault ni `${cred:...}`: credenciales en
+  `.bounty/config.json` (gitignored), documentado en `docs/config.md`.
+- **S27** — ADR-0004 sustituye la parte de firewall de ADR-0003 como requisito. Control declarado:
+  configuración. `proxy.ts` queda como capa de registro y limitación. La condición de uso
+  (no compartir contexto con una sesión con `bash` libre) está en README y ADR en texto claro.
+- **S28** — comportamiento automático sin variable de modo: pausa solo en alcance nuevo, clase
+  destructiva y envío de reporte. Tests de destructivo con "no" (no ejecuta) y con "sí" (ejecuta).
+- **S29** — `status.md` en lenguaje llano + `bounty_status` devolviendo el mismo texto; reescrito en
+  cada transición de fase y cada cambio de estado de hallazgo.
+- **S30** — runner de **250 líneas** (presupuesto 800), allowlist dura, verificación posterior de la
+  lista de tools activas, tests de contrato con `pi` falso (`tests/fixtures/fake-pi.mjs`).
+- **S31/S32** — Fase E queda en un solo nivel; este informe es el checkpoint 3.
+
+Estado del repo: 171 tests, 0 fallos; 6 commits de la Fase D.
+
+Hueco detectado al cerrar (registrado, no oculto): un host pasado como **valor de un flag de archivo
+conocido** (`-o`, `-t`, `-w`, `--config`…) no se valida, porque ese valor se saltea por ser ruta
+local. Es un bypass posible si una tool acepta una URL en esa posición. Propuesta: validar también
+los valores de esos flags cuando parsean como URL. No aplicado todavía.
+
+NO VERIFICADO: la extensión dentro de una sesión real de Pi; la combinación real
+`--mode json --no-mcp -ne -e` en un `pi` hijo; la firma de `ctx.ui.confirm`; `resolveCname` con
+cadenas; IP privada/metadata y pinning anti-TOCTOU (S27d, aplazados). El smoke real
+(`npm run test:live`) está escrito y **no se ejecutó**.
