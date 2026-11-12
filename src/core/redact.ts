@@ -77,6 +77,19 @@ const SENSITIVE_QUERY = new Set([
 
 const REDACTED = "[REDACTED]";
 
+/**
+ * S26: redaction is OFF by default. Test-account credentials travel to the model unredacted because
+ * the operator decided the friction was not worth it; the evidence store keeps the raw bytes either
+ * way. Truncation is NOT redaction: it stays on in both modes, because a 2 MB body does not fit a
+ * prompt.
+ */
+export type RedactionMode = "off" | "on";
+export const DEFAULT_REDACTION_MODE: RedactionMode = "off";
+
+export interface RedactionModeOptions extends RedactOptions {
+	redaction?: RedactionMode;
+}
+
 export function redactHeaders(input: Record<string, string>): { headers: Record<string, string>; redactions: string[] } {
 	const headers: Record<string, string> = {};
 	const redactions: string[] = [];
@@ -130,6 +143,13 @@ export function redactText(input: string): { text: string; redactions: string[] 
 		redactions.push("body:credential-field");
 	}
 
+	// Header-style lines inside a captured body (`Cookie: ...`, `Authorization: ...`).
+	const headerLine = /(^|\n)(cookie|set-cookie|authorization|x-api-key|proxy-authorization)\s*:\s*[^\n]*/gi;
+	if (headerLine.test(text)) {
+		text = text.replace(headerLine, "$1$2: [REDACTED]");
+		redactions.push("body:credential-header");
+	}
+
 	const email = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 	if (email.test(text)) {
 		text = text.replace(email, "[REDACTED:email]");
@@ -153,6 +173,22 @@ function truncate(body: string, options: RedactOptions): { body: string; truncat
 	return { body: `${body.slice(0, limit)}... [truncated ${dropped} bytes]`, truncatedBytes: dropped };
 }
 
+/**
+ * The view the model actually receives. `redaction` defaults to `"off"` (S26).
+ */
+export function requestViewForModel(request: RawRequest, options: RedactionModeOptions = {}): RedactedRequestView {
+	if ((options.redaction ?? DEFAULT_REDACTION_MODE) === "on") return redactRequest(request, options);
+	const body = request.body === undefined || request.body === null ? null : truncate(request.body, options);
+	return {
+		method: request.method ?? "GET",
+		url: request.url,
+		headers: { ...(request.headers ?? {}) },
+		body: body === null ? null : body.body,
+		redactions: [],
+		...(body !== null && body.truncatedBytes !== undefined ? { truncatedBytes: body.truncatedBytes } : {}),
+	};
+}
+
 export function redactRequest(request: RawRequest, options: RedactOptions = {}): RedactedRequestView {
 	const url = redactUrl(request.url);
 	const headers = redactHeaders(request.headers ?? {});
@@ -171,6 +207,19 @@ export function redactRequest(request: RawRequest, options: RedactOptions = {}):
 		body: body.body,
 		redactions,
 		...(body.truncatedBytes === undefined ? {} : { truncatedBytes: body.truncatedBytes }),
+	};
+}
+
+/** The response view the model receives. `redaction` defaults to `"off"` (S26). */
+export function responseViewForModel(response: RawResponse, options: RedactionModeOptions = {}): RedactedResponseView {
+	if ((options.redaction ?? DEFAULT_REDACTION_MODE) === "on") return redactResponse(response, options);
+	const body = response.body === undefined || response.body === null ? null : truncate(response.body, options);
+	return {
+		status: response.status,
+		headers: { ...(response.headers ?? {}) },
+		body: body === null ? null : body.body,
+		redactions: [],
+		...(body !== null && body.truncatedBytes !== undefined ? { truncatedBytes: body.truncatedBytes } : {}),
 	};
 }
 

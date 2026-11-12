@@ -73,7 +73,7 @@ const FILE_FLAGS = new Set([
 	"-stats-json",
 ]);
 
-const LIST_FLAGS = new Set(["-l", "--list", "--list-file", "--hosts"]);
+const LIST_FLAGS = new Set(["-l", "--list", "--list-file", "--hosts", "--targets", "-targets", "--host-file"]);
 const URL_IN_TEXT = /[a-z][a-z0-9+.-]*:\/\/[^\s"'<>,)]+/gi;
 const HEADER_HOST = /(?:^|[\s,;])(?:host|x-forwarded-host|x-forwarded-server|forwarded|origin|referer)\s*:\s*([^\s,;]+)/gi;
 const BARE_HOST = /^[A-Za-z0-9._:*[\]-]+$/;
@@ -100,12 +100,19 @@ function headerValue(headers: Record<string, string> | undefined, name: string):
 async function collectFromArgv(
 	argv: string[],
 	readFile: (path: string) => Promise<string>,
-): Promise<{ parsed: ParsedContact[]; problem?: { reason: string; detail?: string } }> {
+): Promise<{ parsed: ParsedContact[]; skipped: string[]; problem?: { reason: string; detail?: string } }> {
 	const parsed: ParsedContact[] = [];
 
-	const push = (raw: string, source: ContactSource): { reason: string; detail?: string } | null => {
+	// S24: every token that parses as a host, URL or IP is validated wherever it appears, with no
+	// per-tool profile. A token that does not parse as a host is not a host: it is noted and does not
+	// block the run.
+	const skipped: string[] = [];
+	const push = (raw: string, source: ContactSource): null => {
 		const target = canonical(raw);
-		if (!target) return { reason: `argv references an unparseable host: ${JSON.stringify(raw)}` };
+		if (!target) {
+			skipped.push(raw);
+			return null;
+		}
 		parsed.push({ contact: { host: target.host, source, raw }, target });
 		return null;
 	};
@@ -117,21 +124,21 @@ async function collectFromArgv(
 			const inline = token.includes("=") ? token.slice(token.indexOf("=") + 1) : undefined;
 			const path = inline ?? argv[index + 1];
 			if (inline === undefined) index += 1;
-			if (!path) return { parsed, problem: { reason: `list flag ${token} has no file` } };
+			if (!path) return { parsed, skipped, problem: { reason: `list flag ${token} has no file` } };
 			let text: string;
 			try {
 				text = await readFile(path);
 			} catch (error) {
 				return {
 					parsed,
+					skipped,
 					problem: { reason: `cannot read list file ${path}`, detail: (error as Error).message },
 				};
 			}
 			for (const line of text.split(/\r?\n/)) {
 				const entry = line.trim();
 				if (entry.length === 0 || entry.startsWith("#")) continue;
-				const problem = push(entry, "list");
-				if (problem) return { parsed, problem };
+				push(entry, "list");
 			}
 			continue;
 		}
@@ -149,14 +156,12 @@ async function collectFromArgv(
 
 		for (const value of values) {
 			for (const match of value.matchAll(URL_IN_TEXT)) {
-				const problem = push(match[0], "argv");
-				if (problem) return { parsed, problem };
+				push(match[0], "argv");
 			}
 			for (const match of value.matchAll(HEADER_HOST)) {
 				const headerHost = match[1];
 				if (!headerHost) continue;
-				const problem = push(headerHost, "header-host");
-				if (problem) return { parsed, problem };
+				push(headerHost, "header-host");
 			}
 		}
 
@@ -165,14 +170,13 @@ async function collectFromArgv(
 		if (bare !== token || !token.startsWith("-")) {
 			if (bare === "localhost" || (BARE_HOST.test(bare) && bare.includes(".") && !URL_IN_TEXT.test(bare))) {
 				URL_IN_TEXT.lastIndex = 0;
-				const problem = push(bare, "argv");
-				if (problem) return { parsed, problem };
+				push(bare, "argv");
 			}
 			URL_IN_TEXT.lastIndex = 0;
 		}
 	}
 
-	return { parsed };
+	return { parsed, skipped };
 }
 
 export async function gate(policy: ScopePolicy, request: GateRequest, deps: GateDeps): Promise<GateResult> {
@@ -236,6 +240,9 @@ export async function gate(policy: ScopePolicy, request: GateRequest, deps: Gate
 		return { allowed: false, reason: fromArgv.problem.reason, detail: fromArgv.problem.detail, contacts: fromArgv.parsed.map((entry) => entry.contact) };
 	}
 	contacts.push(...fromArgv.parsed);
+	if (fromArgv.skipped.length > 0) {
+		notes.push(`argv tokens that are not hosts were ignored: ${fromArgv.skipped.slice(0, 5).join(", ")}`);
+	}
 
 	// 7. scope decision for every contacted host, deduplicated by canonical host
 	const seen = new Set<string>();
@@ -259,7 +266,7 @@ export async function gate(policy: ScopePolicy, request: GateRequest, deps: Gate
 		}
 		return {
 			allowed: false,
-			reason: `no in_scope rule matched ${entry.contact.host}`,
+			reason: `no in_scope rule matched ${entry.contact.host}${entry.target.port === null ? "" : `:${entry.target.port}`}`,
 			detail: `${verdict.reason} (reached via ${entry.contact.source} ${JSON.stringify(entry.contact.raw)})`,
 			contacts: unique.map((item) => item.contact),
 		};
