@@ -30,33 +30,34 @@ interface Harness {
 	cleanup(): Promise<void>;
 }
 
-async function harness(options: { confirm?: boolean } = {}): Promise<Harness> {
+async function harness(options: { confirm?: boolean; verifier?: boolean; scope?: string } = {}): Promise<Harness> {
 	const lab = await startLab();
 	const dir = await mkdtemp(join(tmpdir(), "bounty-phase-e-"));
 	await mkdir(join(dir, "work", "lab"), { recursive: true });
 	const scopePath = join(dir, "scope.yaml");
-	await writeFile(
-		scopePath,
-		`program: lab
-lab: true
-authorized_on: 2026-11-11
-in_scope:
-  - 127.0.0.1:${lab.port}
-limits:
-  rate_rps: 5
-  allowed_methods:
-    - GET
-  redirects: reject
-  forbidden:
-    - dos
-    - brute-force
-`,
-		"utf8",
-	);
+
+	const defaultScope = [
+		"program: lab",
+		"lab: true",
+		"authorized_on: 2026-11-11",
+		"in_scope:",
+		`  - 127.0.0.1:${lab.port}`,
+		"limits:",
+		"  rate_rps: 5",
+		"  allowed_methods:",
+		"    - GET",
+		"  redirects: reject",
+		"  forbidden:",
+		"    - dos",
+		"    - brute-force",
+	].join("\n");
+	const requestedScope = options.scope ?? defaultScope;
+	await writeFile(scopePath, `${requestedScope.replaceAll("PORT", String(lab.port))}\n`, "utf8");
+
 	const fetchTool = createFetchTool();
 	const confirmations: string[] = [];
 	const session = createSession(
-		{ root: dir, program: "lab" },
+		{ root: dir, program: "lab", verifier: options.verifier === true },
 		{
 			dns: async () => ({ cname: [] }),
 			readFile: (path) => readFile(path, "utf8"),
@@ -67,7 +68,7 @@ limits:
 			},
 		},
 	);
-	await session.scope({ file: scopePath, confirm: true });
+	await session.scope({ file: scopePath, confirm: async () => true });
 	return {
 		dir,
 		lab,
@@ -101,11 +102,24 @@ test("negative 1: leaving the scope is blocked and the reason is in status.md", 
 });
 
 test("negative 2: an inferred destructive class pauses and executes nothing", async () => {
-	const h = await harness({ confirm: false });
+	// The pause only happens for a class the program does NOT forbid (S64).
+	const h = await harness({
+		confirm: false,
+		scope: `program: lab
+lab: true
+authorized_on: 2026-11-11
+in_scope:
+  - 127.0.0.1:PORT
+limits:
+  rate_rps: 5
+  allowed_methods:
+    - GET
+  redirects: reject`,
+	});
 	try {
 		const hydra = await h.session.run({
 			tool: "hydra",
-			args: ["-L", "logins.txt", "-P", "passwords.txt", "127.0.0.1", "ssh"],
+			args: ["-L", "logins.txt", "-P", "passwords.txt", `127.0.0.1:${h.lab.port}`, "ssh"],
 			target: `http://127.0.0.1:${h.lab.port}/login`,
 		});
 		assert.equal(hydra.ok, false);
@@ -140,6 +154,23 @@ test("negative 3: a planted injection is recorded as data and never executed", a
 	}
 });
 
+test("negative 2b: a class the program forbids is a hard denial, with no confirmation offered", async () => {
+	const h = await harness({ confirm: true });
+	try {
+		const hydra = await h.session.run({
+			tool: "hydra",
+			args: ["-L", "logins.txt", "-P", "passwords.txt", `127.0.0.1:${h.lab.port}`, "ssh"],
+			target: `http://127.0.0.1:${h.lab.port}/login`,
+		});
+		assert.equal(hydra.ok, false);
+		assert.match(hydra.text, /prohíbe brute-force/);
+		assert.equal(h.confirmations.length, 0, "a forbidden class must not even ask");
+		assert.equal(h.executed.length, 0);
+	} finally {
+		await h.cleanup();
+	}
+});
+
 test("negative 4: a rate above the program limit is destructive, so it pauses", async () => {
 	const h = await harness({ confirm: false });
 	try {
@@ -158,7 +189,7 @@ test("negative 4: a rate above the program limit is destructive, so it pauses", 
 });
 
 test("the positive path: two reproductions, a verified finding and a report that passes", async () => {
-	const h = await harness();
+	const h = await harness({ verifier: true });
 	try {
 		const own = await h.session.run({ tool: "get", args: [`http://127.0.0.1:${h.lab.port}/api/invoices/1`, "--user", "alice"], target: `http://127.0.0.1:${h.lab.port}/api/invoices/1` });
 		const other = await h.session.run({ tool: "get", args: [`http://127.0.0.1:${h.lab.port}/api/invoices/2`, "--user", "alice"], target: `http://127.0.0.1:${h.lab.port}/api/invoices/2` });

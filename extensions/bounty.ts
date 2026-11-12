@@ -8,6 +8,7 @@
  * **It has not been executed inside a live Pi session yet** — that is the first thing Phase E does.
  */
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { resolveCname } from "node:dns/promises";
@@ -15,6 +16,7 @@ import { isIP } from "node:net";
 
 import { createSession, type ProgramSession, type ToolExecution } from "../src/pi/session.ts";
 import { loadGlobalConfig, type GlobalConfig } from "../src/core/config.ts";
+import { buildDomainPrompt } from "../src/pi/prompt.ts";
 import type { BountyPhase } from "../src/core/status.ts";
 import type { RedactionMode } from "../src/core/redact.ts";
 
@@ -24,6 +26,7 @@ interface PiToolContext {
 }
 
 interface PiLike {
+	on?(event: "before_agent_start", handler: (event: { systemPromptOptions?: { sections?: Record<string, string> } }) => void): void;
 	registerTool(spec: {
 		name: string;
 		label?: string;
@@ -86,7 +89,22 @@ function runProcess(argv: string[], cwd: string): Promise<ToolExecution> {
 	});
 }
 
+// S68: the domain prompt is built once, from the assets, before any turn happens.
+const assetsDir = fileURLToPath(new URL("../assets/", import.meta.url));
+const domainPrompt = await buildDomainPrompt((path) => readFile(path, "utf8"), assetsDir).catch((error: Error) => {
+	console.error(`gentle-bounty: no pude armar el prompt de dominio: ${error.message}`);
+	return null;
+});
+
 export default function bountyExtension(pi: PiLike): void {
+	pi.on?.("before_agent_start", (event) => {
+		if (domainPrompt === null) return;
+		const sections = event.systemPromptOptions?.sections;
+		if (sections === undefined) return;
+		// Least invasive injection: a named section, not a forced replacement of the whole prompt.
+		sections["gentle-bounty-domain"] = domainPrompt;
+	});
+
 	const root = process.env.GENTLE_BOUNTY_ROOT ?? process.cwd();
 	const sessions = new Map<string, ProgramSession>();
 	let config: GlobalConfig | null = null;
@@ -106,7 +124,14 @@ export default function bountyExtension(pi: PiLike): void {
 		const existing = sessions.get(program);
 		if (existing) return existing;
 		const created = createSession(
-			{ root, program, redaction: config?.redaction ?? redactionMode(), budget: config?.budget },
+			{
+				root,
+				program,
+				redaction: config?.redaction ?? redactionMode(),
+				budget: config?.budget,
+				// S66: the verifier runs in its own process and is launched with this flag.
+				verifier: process.env.GENTLE_BOUNTY_VERIFIER === "1",
+			},
 			{
 				dns: resolveForGate,
 				readFile: (path) => readFile(path, "utf8"),
@@ -141,9 +166,15 @@ export default function bountyExtension(pi: PiLike): void {
 			},
 			required: ["program", "file"],
 		} as never,
-		async execute(_toolCallId, params) {
+		async execute(_toolCallId, params, _signal, _onUpdate, context) {
 			const session = await sessionFor(String(params.program));
-			const result = await session.scope({ file: String(params.file), confirm: params.confirm === true });
+			// S63: the model's `confirm` flag is not an answer. Only the human UI is.
+			const ui = context?.ui;
+			const confirm =
+				typeof ui?.confirm === "function"
+					? async (question: string) => Boolean(await ui.confirm("Confirmar alcance", question))
+					: undefined;
+			const result = await session.scope({ file: String(params.file), ...(confirm === undefined ? {} : { confirm }) });
 			return text(result.text, { ok: result.ok });
 		},
 	});
@@ -294,6 +325,43 @@ export default function bountyExtension(pi: PiLike): void {
 		} as never,
 		async execute(_toolCallId, params) {
 			const result = await sessionFor(String(params.program)).stop(String(params.reason ?? "pedido del humano"));
+			return text(result.text, { ok: result.ok });
+		},
+	});
+
+	pi.registerTool({
+		name: "bounty_report",
+		label: "Bounty report",
+		description:
+			"Write the canonical report for a verified finding. Takes the CVSS v4.0 base metrics (never a score: the score is computed), validates against the checklist and writes work/<program>/reports/<id>.md. It never sends anything to a platform.",
+		parameters: {
+			type: "object",
+			additionalProperties: false,
+			properties: {
+				program: { type: "string" },
+				finding_id: { type: "string" },
+				metrics: {
+					type: "object",
+					description: "CVSS v4.0 base metrics: AV, AC, AT, PR, UI, VC, VI, VA, SC, SI, SA.",
+				},
+				summary: { type: "string" },
+				steps: { type: "array", items: { type: "string" } },
+				impact: { type: "string" },
+				remediation: { type: "string" },
+			},
+			required: ["program", "finding_id", "metrics"],
+		} as never,
+		async execute(_toolCallId, params) {
+			const session = await sessionFor(String(params.program));
+			const metrics = (params.metrics ?? {}) as Record<string, string>;
+			const result = await session.report({
+				findingId: String(params.finding_id),
+				metrics,
+				...(params.summary === undefined ? {} : { summary: String(params.summary) }),
+				...(Array.isArray(params.steps) ? { steps: params.steps.map(String) } : {}),
+				...(params.impact === undefined ? {} : { impact: String(params.impact) }),
+				...(params.remediation === undefined ? {} : { remediation: String(params.remediation) }),
+			});
 			return text(result.text, { ok: result.ok });
 		},
 	});

@@ -24,6 +24,10 @@ export interface ProgramState {
 	program: string;
 	phase: BountyPhase;
 	scopeConfirmedAt: string | null;
+	/** sha256 of the scope file the last time it was confirmed (S63). */
+	scopeConfirmedHash: string | null;
+	/** sha256 of the scope file as it sits on disk right now (S63). */
+	scopeHash: string | null;
 	pending: PendingConfirmation | null;
 	nextStep: string;
 	notes: string[];
@@ -65,7 +69,15 @@ export function renderStatus(input: { state: ProgramState; findings: Finding[]; 
 	lines.push(`# ${state.program} — estado`, "");
 	lines.push(`**Fase actual:** ${state.phase}`);
 	lines.push(`**Qué está pasando:** ${PHASE_TEXT[state.phase]}`);
-	if (scopePath) lines.push(`**Alcance:** \`${scopePath}\`${state.scopeConfirmedAt ? ` (confirmado el ${state.scopeConfirmedAt.slice(0, 10)})` : " (todavía sin confirmar)"}`);
+	if (scopePath) {
+		const confirmed = state.scopeConfirmedHash !== null && state.scopeHash !== null && state.scopeConfirmedHash === state.scopeHash;
+		const suffix = confirmed
+			? ` (confirmado el ${(state.scopeConfirmedAt ?? "").slice(0, 10)}, hash ${(state.scopeHash ?? "").slice(0, 12)}…)`
+			: state.scopeConfirmedHash === null
+				? " (todavía sin confirmar)"
+				: " (cambió desde la última confirmación: hay que volver a confirmarlo)";
+		lines.push(`**Alcance:** \`${scopePath}\`${suffix}`);
+	}
 	lines.push("");
 
 	lines.push(`## Hallazgos (${findings.length})`);
@@ -115,7 +127,8 @@ export interface StatusStore {
 	write(state: ProgramState): Promise<void>;
 	setPhase(phase: BountyPhase, nextStep?: string): Promise<ProgramState>;
 	setPending(pending: PendingConfirmation | null): Promise<ProgramState>;
-	confirmScope(): Promise<ProgramState>;
+	confirmScope(hash?: string): Promise<ProgramState>;
+	setScopeHash(hash: string | null): Promise<ProgramState>;
 	note(text: string): Promise<ProgramState>;
 	file(): string;
 }
@@ -136,6 +149,8 @@ export function createStatusStore(options: { workDir: string; program: string; n
 			program: options.program,
 			phase: "scope",
 			scopeConfirmedAt: null,
+			scopeConfirmedHash: null,
+			scopeHash: null,
 			pending: null,
 			nextStep: "",
 			notes: [],
@@ -177,10 +192,22 @@ export function createStatusStore(options: { workDir: string; program: string; n
 			return state;
 		},
 
-		async confirmScope() {
+		async confirmScope(hash?: string) {
 			const state = await this.read();
 			state.scopeConfirmedAt = new Date(now()).toISOString();
+			// S63: the confirmation is bound to the exact bytes that were confirmed.
+			if (hash !== undefined) {
+				state.scopeConfirmedHash = hash;
+				state.scopeHash = hash;
+			}
 			if (state.pending?.kind === "scope") state.pending = null;
+			await this.write(state);
+			return state;
+		},
+
+		async setScopeHash(hash) {
+			const state = await this.read();
+			state.scopeHash = hash;
 			await this.write(state);
 			return state;
 		},

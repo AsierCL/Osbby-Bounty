@@ -8,19 +8,21 @@
  * Everything that touches the outside world is injected: the DNS resolver, the file reader, the tool
  * executor and the confirmation callback. No test here spawns a process or resolves a host.
  */
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { classifyDestructive } from "../core/destructive.ts";
 import { resolveConfirm } from "./confirm.ts";
 import { createBudget, type BudgetPolicy } from "./budget.ts";
 import { createStopController, type StopController } from "./stop.ts";
-import { createEvidenceStore, type EvidenceStore } from "../core/evidence.ts";
+import { createEvidenceStore, sha256, type EvidenceStore } from "../core/evidence.ts";
 import { createFindingsStore, type Finding, type FindingsStore } from "../core/findings.ts";
 import { gate, type DnsResolver, type GateRequest } from "../core/gate.ts";
 import { createRateLimiter, type Limiter } from "../core/ratelimit.ts";
 import { requestViewForModel, responseViewForModel, type RedactionMode } from "../core/redact.ts";
 import { parseScope, evaluate, type ScopePolicy } from "../core/scope.ts";
+import { scoreVector } from "../core/cvss.ts";
+import { renderReport, validateReport } from "../core/report.ts";
 import { createStatusStore, renderStatus, writeStatusFile, type BountyPhase, type ProgramState, type StatusStore } from "../core/status.ts";
 
 export interface ProgramConfig {
@@ -29,6 +31,8 @@ export interface ProgramConfig {
 	program: string;
 	redaction?: RedactionMode;
 	budget?: BudgetPolicy;
+	/** S66: only a verifier session may move a finding to verified/rejected. */
+	verifier?: boolean;
 	now?: () => number;
 }
 
@@ -86,6 +90,14 @@ export interface ProgramSession {
 		reason?: string;
 	}): Promise<ToolResult>;
 	phase(input: { phase: BountyPhase; nextStep?: string }): Promise<ToolResult>;
+	report(input: {
+		findingId: string;
+		metrics: Record<string, string>;
+		summary?: string;
+		steps?: string[];
+		impact?: string;
+		remediation?: string;
+	}): Promise<ToolResult>;
 	status(): Promise<ToolResult>;
 }
 
@@ -148,16 +160,22 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				return { ok: false, text: `El alcance no parsea, así que no lo uso:\n- ${parsed.errors.join("\n- ")}` };
 			}
 
-			// S47: the confirmation stub is a test affordance. It only ever answers inside a lab, and a
-			// scope that is not declared as one refuses to load while the stub is requested.
+			// S47: the confirmation stub is a test affordance and only ever answers inside a lab.
 			const stub = resolveConfirm({ env: deps.env, lab: parsed.policy.lab });
 			if (stub.stubRequested && parsed.policy.lab !== true) {
-				const message =
-					"El stub de confirmación está activo y este scope no está marcado como laboratorio (lab: true). No cargo el alcance.";
-				await status.note(`scope rechazado: ${message}`);
+				await status.note("scope rechazado: el stub de confirmación está activo y el scope no es lab: true");
 				await refresh("Corregí el scope o sacá las variables del stub.");
-				return { ok: false, text: message };
+				return {
+					ok: false,
+					text: "El stub de confirmación está activo y este scope no está marcado como laboratorio (lab: true). No cargo el alcance.",
+				};
 			}
+
+			// S63: the confirmation is bound to the exact bytes, never to what the model claims.
+			const hash = sha256(text);
+			await status.setScopeHash(hash);
+			const previous = await status.read();
+			const alreadyConfirmed = previous.scopeConfirmedHash === hash;
 
 			policy = parsed.policy;
 			scopePath = input.file;
@@ -176,7 +194,7 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			}
 
 			const summary = [
-				`Programa: ${parsed.policy.program}`,
+				`Programa: ${parsed.policy.program}${parsed.policy.lab ? " (laboratorio)" : " (programa real)"}`,
 				`En alcance: ${parsed.policy.inScope.length} regla(s)`,
 				...parsed.policy.inScope.map((rule) => `  - ${rule.raw}`),
 				`Fuera de alcance: ${parsed.policy.outOfScope.length} regla(s)`,
@@ -187,19 +205,36 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				...(ambiguities.length > 0 ? ["A confirmar:", ...ambiguities.map((item) => `  - ${item}`)] : []),
 			].join("\n");
 
-			if (input.confirm === true) {
-				await status.confirmScope();
-				await refresh("Con el alcance confirmado, arranco el reconocimiento.");
-				return { ok: true, text: `${summary}\n\nAlcance confirmado. Arranco.` };
+			if (alreadyConfirmed) {
+				await refresh("El alcance ya estaba confirmado para este mismo archivo: sigo.");
+				return {
+					ok: true,
+					text: `${summary}\n\nEste alcance ya lo confirmaste (hash ${hash.slice(0, 12)}…): no te vuelvo a preguntar.`,
+				};
 			}
 
-			await status.setPending({ kind: "scope", detail: `alcance de ${parsed.policy.program}`, since: "" });
-			const rendered = await refresh("Esperando tu OK del alcance para arrancar.");
-			void rendered;
-			return {
-				ok: true,
-				text: `${summary}\n\nEsperando tu confirmación del alcance (decime "confirmo" y sigo). Mientras tanto escribí el resumen en ${status.file()}.`,
-			};
+			// Ask the human. `input.confirm === true` from the model is not an answer (S63).
+			const uiConfirm = typeof input.confirm === "function" ? input.confirm : deps.confirm;
+			const resolved = resolveConfirm({ env: deps.env, lab: parsed.policy.lab, uiConfirm });
+			const approved = await resolved.confirm(
+				`Alcance de ${parsed.policy.program} (hash ${hash.slice(0, 12)}…)\n\n${summary}\n\n¿Confirmás este alcance?`,
+			);
+
+			if (!approved) {
+				// Nothing loaded: the gate will refuse every bounty_run until a human confirms.
+				policy = null;
+				limiter = null;
+				await status.setPending({ kind: "scope", detail: `alcance de ${parsed.policy.program}`, since: "" });
+				await refresh("El alcance no está confirmado: no voy a ejecutar nada hasta que lo confirmes.");
+				return {
+					ok: false,
+					text: `${summary}\n\nNo cargo el alcance: no hay confirmación humana (el "confirm" del modelo no alcanza). Quedó pendiente en ${status.file()}.`,
+				};
+			}
+
+			await status.confirmScope(hash);
+			await refresh("Con el alcance confirmado, arranco el reconocimiento.");
+			return { ok: true, text: `${summary}\n\nAlcance confirmado por un humano (hash ${hash.slice(0, 12)}…). Arranco.` };
 		},
 
 		async run(input) {
@@ -222,6 +257,25 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				followRedirects: input.followRedirects,
 				headers: current.requiredHeaders,
 			};
+
+			// S63: the scope on disk must be the one a human confirmed. Edited scope => denied.
+			if (scopePath !== null) {
+				let onDisk: string | null = null;
+				try {
+					onDisk = await deps.readFile(scopePath);
+				} catch {
+					onDisk = null;
+				}
+				const state = await status.read();
+				if (onDisk === null || state.scopeConfirmedHash !== sha256(onDisk)) {
+					await status.note("bloqueado: el scope cambió desde la última confirmación");
+					await refresh("Volvé a cargar y confirmar el alcance antes de seguir.");
+					return {
+						ok: false,
+						text: "El scope cambió desde la última confirmación (hash distinto): no ejecuto nada. Volvé a cargarlo con bounty_scope y confirmalo.",
+					};
+				}
+			}
 
 			const decision = await gate(current, request, { dns: deps.dns, readFile: deps.readFile });
 			if (!decision.allowed) {
@@ -248,6 +302,18 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 					}
 				})(),
 			});
+
+			// S64: a class the program forbids is a hard denial, not a pause. There is no confirmation
+			// that can override it: to allow it, the scope has to be edited.
+			const forbiddenHit = classification.classes.filter((item) => current.limits.forbidden.includes(item));
+			if (forbiddenHit.length > 0) {
+				await status.note(`denegado por el programa: ${forbiddenHit.join(", ")} (${input.tool})`);
+				await refresh("El programa prohíbe esa clase: no se ejecuta.");
+				return {
+					ok: false,
+					text: `Denegado por el alcance: el programa prohíbe ${forbiddenHit.join(", ")}. No hay confirmación que lo habilite; para permitirlo hay que editar el scope.`,
+				};
+			}
 
 			if (classification.destructive) {
 				await status.setPending({
@@ -366,6 +432,13 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			}
 			if (input.action === "update") {
 				if (!input.id || !input.state) return { ok: false, text: "Para actualizar necesito id y state." };
+				// S66: the agent that found something does not get to call it verified.
+				if ((input.state === "verified" || input.state === "rejected") && config.verifier !== true) {
+					return {
+						ok: false,
+						text: `Un hallazgo solo pasa a ${input.state} por el verificador independiente (lanza bounty-verify con el id y la evidencia). El agente que lo encontró no puede marcarlo.`,
+					};
+				}
 				try {
 					const updated = await findings.update(
 						input.id,
@@ -390,6 +463,56 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			return {
 				ok: true,
 				text: all.map((finding) => `${finding.id} [${finding.state}] ${finding.title} — ${finding.endpoint}`).join("\n") || "Sin hallazgos todavía.",
+			};
+		},
+
+		async report(input) {
+			const finding = await findings.get(input.findingId);
+			if (!finding) return { ok: false, text: `No existe el hallazgo ${input.findingId}.` };
+			if (finding.state !== "verified") {
+				return {
+					ok: false,
+					text: `No reporto un hallazgo en estado ${finding.state}: primero tiene que verificarlo el verificador independiente.`,
+				};
+			}
+
+			// S67: the model passes base metrics, never a score. M* metrics are rejected on purpose.
+			const BASE = ["AV", "AC", "AT", "PR", "UI", "VC", "VI", "VA", "SC", "SI", "SA"];
+			const keys = Object.keys(input.metrics);
+			const modified = keys.filter((key) => key.startsWith("M"));
+			if (modified.length > 0) {
+				return { ok: false, text: `Métricas modificadas no soportadas: ${modified.join(", ")}. Se rechazan en vez de ignorarlas.` };
+			}
+			const unknown = keys.filter((key) => !BASE.includes(key));
+			if (unknown.length > 0) return { ok: false, text: `Métricas desconocidas: ${unknown.join(", ")}.` };
+			const missing = BASE.filter((key) => input.metrics[key] === undefined);
+			if (missing.length > 0) return { ok: false, text: `Faltan métricas base: ${missing.join(", ")}.` };
+
+			const vector = `CVSS:4.0/${BASE.map((key) => `${key}:${input.metrics[key]}`).join("/")}`;
+			const scored = scoreVector(vector);
+			if ("ok" in scored) return { ok: false, text: `El vector no es válido: ${scored.errors.join("; ")}` };
+
+			const records = await evidence.read();
+			const markdown = renderReport({
+				finding: { ...finding, cvss: vector, score: scored.score },
+				evidence: records.filter((record) => ["execution", "execution-result", "request", "response", "http-request", "http-response", "observation"].includes(record.kind)),
+				program: config.program,
+				reproductionSteps: input.steps ?? [],
+				impact: input.impact ?? "",
+				remediation: input.remediation ?? "",
+			});
+			const check = validateReport(markdown);
+			if (!check.ok) return { ok: false, text: `El reporte no cumple la checklist: falta ${check.missing.join(", ")}.` };
+
+			await mkdir(join(workspace, "reports"), { recursive: true });
+			const path = join(workspace, "reports", `${finding.id}.md`);
+			await writeFile(path, markdown, "utf8");
+			await findings.update(finding.id, { cvss: vector, score: scored.score, notes: [input.summary ?? "reporte generado"] }, "reporte");
+			await status.note(`reporte ${finding.id} escrito en ${path} (espera envío humano)`);
+			await refresh("El reporte está escrito: lo revisás y lo mandás vos.");
+			return {
+				ok: true,
+				text: `Reporte escrito en ${path}\nSeveridad calculada: ${scored.score.toFixed(1)} (${scored.severity}) — ${vector}\nNo se envió a ninguna plataforma: eso lo hacés vos.`,
 			};
 		},
 

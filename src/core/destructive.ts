@@ -43,6 +43,8 @@ export interface DestructiveVerdict {
 	destructive: boolean;
 	reason: string | null;
 	signals: string[];
+	/** Classes the heuristics actually matched, so the session can intersect them with the program's forbidden list (S64). */
+	classes: string[];
 }
 
 function numericValue(args: string[], flags: Set<string>, shortWithValue: boolean): number | null {
@@ -84,18 +86,32 @@ export function classifyDestructive(input: DestructiveInput): DestructiveVerdict
 	const binary = input.tool.trim();
 	const targetPath = input.targetPath ?? stringValue(input.args, TARGET_FLAGS) ?? "";
 
-	if (BRUTE_FORCE_BINARIES.test(binary)) strong.push(`binary "${binary}" is a credential brute-force tool`);
+	const classes: string[] = [];
+	if (BRUTE_FORCE_BINARIES.test(binary)) {
+		strong.push(`binary "${binary}" is a credential brute-force tool`);
+		classes.push("brute-force");
+	}
 
-	if (input.args.some((arg) => FLOOD_FLAGS.test(arg))) strong.push("flooding flag in argv");
-	if (input.args.some((arg) => /rate[-_]?limit\s*[=\s]?0\b/i.test(arg))) strong.push("rate limited to zero means no limit");
+	if (input.args.some((arg) => FLOOD_FLAGS.test(arg))) {
+		strong.push("flooding flag in argv");
+		classes.push("dos");
+	}
+	if (input.args.some((arg) => /rate[-_]?limit\s*[=\s]?0\b/i.test(arg))) {
+		strong.push("rate limited to zero means no limit");
+		classes.push("fuzzing-flood");
+	}
 
 	const tags = stringValue(input.args, TAGS_FLAGS);
-	if (tags !== null && DANGEROUS_TAGS.test(tags)) strong.push(`nuclei tags "${tags}" include an intrusive class`);
+	if (tags !== null && DANGEROUS_TAGS.test(tags)) {
+		strong.push(`nuclei tags "${tags}" include an intrusive class`);
+		classes.push("dos");
+	}
 
 	const wordlist = stringValue(input.args, WORDLIST_FLAGS);
 	if (wordlist !== null && PASSWORD_WORDLIST.test(wordlist)) {
 		if (LOGIN_PATH.test(targetPath) || BRUTE_FORCE_BINARIES.test(binary)) {
 			strong.push(`password wordlist "${wordlist}" against a login/session endpoint`);
+			classes.push("password-spray");
 		} else {
 			weak.push(`password-looking wordlist "${wordlist}"`);
 		}
@@ -123,7 +139,8 @@ export function classifyDestructive(input: DestructiveInput): DestructiveVerdict
 	signals.push(...strong, ...weak);
 
 	// Ambiguity resolves toward pausing: two weak signals together are treated as destructive.
-	if (strong.length > 0) return { destructive: true, reason: strong[0] ?? "destructive signal", signals };
-	if (weak.length >= 2) return { destructive: true, reason: `ambiguous combination: ${weak.join("; ")}`, signals };
-	return { destructive: false, reason: null, signals };
+	if (input.technique !== undefined && DESTRUCTIVE_TECHNIQUES.has(input.technique)) classes.push(input.technique);
+	if (strong.length > 0) return { destructive: true, reason: strong[0] ?? "destructive signal", signals, classes: [...new Set(classes)] };
+	if (weak.length >= 2) return { destructive: true, reason: `ambiguous combination: ${weak.join("; ")}`, signals, classes: [...new Set(classes)] };
+	return { destructive: false, reason: null, signals, classes: [...new Set(classes)] };
 }

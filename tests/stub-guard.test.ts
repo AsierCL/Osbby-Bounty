@@ -78,11 +78,11 @@ test("a real program scope refuses to load while the stub is requested", async (
 test("a lab scope loads with the stub active and the destructive pause still runs", async () => {
 	const h = await harness(scopeText("true"), STUB_ENV);
 	try {
-		const loaded = await h.session.scope({ file: join(h.dir, "scope.yaml"), confirm: true });
+		const loaded = await h.session.scope({ file: join(h.dir, "scope.yaml"), confirm: async () => true });
 		assert.equal(loaded.ok, true, loaded.text);
 		const run = await h.session.run({
 			tool: "hydra",
-			args: ["-L", "logins.txt", "-P", "passwords.txt", "127.0.0.1", "ssh"],
+			args: ["-L", "logins.txt", "-P", "passwords.txt", "127.0.0.1:3000", "ssh"],
 			target: "http://127.0.0.1:3000/login",
 		});
 		assert.equal(run.ok, true, run.text);
@@ -95,7 +95,7 @@ test("a lab scope loads with the stub active and the destructive pause still run
 test("with no stub, a real program scope loads normally", async () => {
 	const h = await harness(scopeText("false"), {} as NodeJS.ProcessEnv);
 	try {
-		const loaded = await h.session.scope({ file: join(h.dir, "scope.yaml"), confirm: true });
+		const loaded = await h.session.scope({ file: join(h.dir, "scope.yaml"), confirm: async () => true });
 		assert.equal(loaded.ok, true, loaded.text);
 	} finally {
 		await h.cleanup();

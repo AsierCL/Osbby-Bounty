@@ -129,6 +129,34 @@ async function preflight(program, root) {
 	if (missing.length === 0) ok("binarios opcionales presentes");
 	else warn(`faltan binarios opcionales (no los instalo): ${missing.join(", ")}. Ojo: el httpx del PATH puede ser el cliente de Python, no el de Project Discovery`);
 
+	// 4b. S69: a lab scope should point at a port where the lab is actually listening.
+	if (policy !== null && policy.lab === true) {
+		const { connect } = await import("node:net");
+		const probe = (host, port) =>
+			new Promise((resolve) => {
+				const socket = connect({ host, port });
+				const done = (result) => {
+					socket.destroy();
+					resolve(result);
+				};
+				socket.setTimeout(300);
+				socket.once("connect", () => done(true));
+				socket.once("timeout", () => done(false));
+				socket.once("error", () => done(false));
+			});
+		for (const rule of policy.inScope) {
+			const port = rule.port === null ? 80 : rule.port;
+			const host = rule.host;
+			if (host !== "127.0.0.1" && host !== "localhost" && host !== "::1") {
+				warn(`la regla ${rule.raw} no es localhost: el preflight no la sondea (solo localhost)`);
+				continue;
+			}
+			const listening = await probe(host, port);
+			if (!listening) warn(`en ${host}:${port} no escucha nada: ¿levantaste el lab? (./scripts/lab-up.sh)`);
+			else ok(`el lab escucha en ${host}:${port}`);
+		}
+	}
+
 	// 5. budget
 	try {
 		const config = await loadGlobalConfig(async (path) => readFileSync(path, "utf8"), join(root, ".bounty", "config.json"));

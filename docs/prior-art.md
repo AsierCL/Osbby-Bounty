@@ -101,11 +101,18 @@ el clon tiene **83 `SKILL.md`**, así que es el mismo repo.
 
 ### Cierre de S49: qué confirma este hallazgo de nuestro diseño
 
-Claude-BugHunter decide "el asset está en scope" **leyendo el texto del finding**. Nosotros no:
-`bounty_finding` no puede pasar un hallazgo a `verified` porque el documento lo afirme. Solo lo hace
-cuando un **verificador independiente lo reproduce con `bounty_run`**, y `bounty_run` atraviesa el
-gate real: canonicalización del host, escaneo genérico de argv, rate limit del programa, confirmación
-de clase destructiva y evidencia encadenada.
+Claude-BugHunter decide "el asset está en scope" **leyendo el texto del finding**. Nosotros no.
+
+Lo que el código garantiza **hoy**: la sesión rechaza `verified` y `rejected` salvo que corra marcada
+como verificador (`config.verifier`), y el verificador se lanza con la tarea armada por
+`src/pi/verifier.ts`, que recibe **solo el id y los artefactos de evidencia** (nada de título, notas
+ni razonamiento). La transición no la puede hacer el agente que encontró el hallazgo.
+
+Lo que **todavía no** está garantizado: no existe aún el script que lanza ese proceso de verificación
+(pendiente de S66), así que en la práctica nada puede dejar un hallazgo en `verified` — que es el lado
+seguro del hueco, pero es un hueco. Y la reproducción sigue siendo trabajo del verificador con
+`bounty_run`, que atraviesa el gate real: canonicalización, escaneo genérico de argv, rate del
+programa, denegación dura de clases prohibidas, confirmación de destructivas y evidencia encadenada.
 
 La diferencia es la que hay entre un **linter de checklist** y un **control ejecutado**. Esto es
 confirmación del diseño, no un cambio: la afirmación "está en scope" nunca es una prueba; la

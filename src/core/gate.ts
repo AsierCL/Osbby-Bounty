@@ -276,11 +276,14 @@ export async function gate(policy: ScopePolicy, request: GateRequest, deps: Gate
 	}
 
 	// 7. scope decision for every contacted host, deduplicated by canonical host
+	// Dedupe by host AND port: a bare `127.0.0.1` token must not be swallowed by an in-scope
+	// `127.0.0.1:33971` target, or a port-less token would ride along unchecked (S64).
 	const seen = new Set<string>();
 	const unique: ParsedContact[] = [];
 	for (const entry of contacts) {
-		if (seen.has(entry.contact.host)) continue;
-		seen.add(entry.contact.host);
+		const key = `${entry.contact.host}:${entry.target.port === null ? "" : entry.target.port}`;
+		if (seen.has(key)) continue;
+		seen.add(key);
 		unique.push(entry);
 	}
 

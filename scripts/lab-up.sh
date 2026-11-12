@@ -11,7 +11,8 @@ if [ -f .lab/pid ] && kill -0 "$(cat .lab/pid)" 2>/dev/null; then
 	exit 0
 fi
 
-nohup node --experimental-strip-types scripts/lab-serve.ts > .lab/lab.log 2>&1 &
+LAB_PORT="${GENTLE_BOUNTY_LAB_PORT:-8787}"
+nohup node --experimental-strip-types scripts/lab-serve.ts "$LAB_PORT" > .lab/lab.log 2>&1 &
 echo $! > .lab/pid
 
 i=0

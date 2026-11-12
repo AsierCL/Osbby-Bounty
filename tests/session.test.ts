@@ -84,10 +84,11 @@ test("loading a scope pauses once with a readable summary and writes status.md",
 	const h = await harness();
 	try {
 		const result = await h.session.scope({ file: join(h.dir, "scope.yaml") });
-		assert.equal(result.ok, true);
+		// S63: without a human answer the scope is not loaded, even though the summary is shown.
+		assert.equal(result.ok, false);
 		assert.match(result.text, /En alcance: 1 regla/);
 		assert.match(result.text, /127\.0\.0\.1:3000/);
-		assert.match(result.text, /Esperando tu confirmación del alcance/);
+		assert.match(result.text, /No cargo el alcance: no hay confirmación humana/);
 		const text = await statusText(h);
 		assert.match(text, /Confirmación del alcance/);
 	} finally {
@@ -99,7 +100,7 @@ test("confirming the scope clears the pending item", async () => {
 	const h = await harness();
 	try {
 		await h.session.scope({ file: join(h.dir, "scope.yaml") });
-		const confirmed = await h.session.scope({ file: join(h.dir, "scope.yaml"), confirm: true });
+		const confirmed = await h.session.scope({ file: join(h.dir, "scope.yaml"), confirm: async () => true });
 		assert.match(confirmed.text, /Alcance confirmado/);
 		const text = await statusText(h);
 		assert.match(text, /Nada pendiente: sigo solo/);
@@ -125,7 +126,7 @@ test("a scope that does not parse is refused and leaves the session unusable", a
 test("an out-of-scope run is blocked and the reason is legible in status.md", async () => {
 	const h = await harness();
 	try {
-		await h.session.scope({ file: join(h.dir, "scope.yaml"), confirm: true });
+		await h.session.scope({ file: join(h.dir, "scope.yaml"), confirm: async () => true });
 		const result = await h.session.run({ tool: "nuclei", args: ["-u", "http://127.0.0.1:9999/"], target: "http://127.0.0.1:9999/" });
 		assert.equal(result.ok, false);
 		assert.match(result.text, /Bloqueado por el gate/);
@@ -140,7 +141,7 @@ test("an out-of-scope run is blocked and the reason is legible in status.md", as
 test("a destructive action always asks, and does nothing when the answer is no", async () => {
 	const h = await harness({ confirm: false, scope: SCOPE_NO_FORBIDDEN });
 	try {
-		await h.session.scope({ file: join(h.dir, "scope.yaml"), confirm: true });
+		await h.session.scope({ file: join(h.dir, "scope.yaml"), confirm: async () => true });
 		const result = await h.session.run({
 			tool: "nuclei",
 			args: ["-u", "http://127.0.0.1:3000/", "-tags", "dos"],
@@ -161,7 +162,7 @@ test("a destructive action always asks, and does nothing when the answer is no",
 test("the same destructive action runs when the human says yes", async () => {
 	const h = await harness({ confirm: true, scope: SCOPE_NO_FORBIDDEN });
 	try {
-		await h.session.scope({ file: join(h.dir, "scope.yaml"), confirm: true });
+		await h.session.scope({ file: join(h.dir, "scope.yaml"), confirm: async () => true });
 		const result = await h.session.run({
 			tool: "nuclei",
 			args: ["-u", "http://127.0.0.1:3000/"],
@@ -179,7 +180,7 @@ test("the daily cap stops the run instead of queueing it", async () => {
 	const scoped = SCOPE.replace("  rate_rps: 50\n", "  rate_rps: 50\n  max_requests_per_day: 1\n");
 	const h = await harness({ scope: scoped });
 	try {
-		await h.session.scope({ file: join(h.dir, "scope.yaml"), confirm: true });
+		await h.session.scope({ file: join(h.dir, "scope.yaml"), confirm: async () => true });
 		const first = await h.session.run({ tool: "nuclei", args: ["-u", "http://127.0.0.1:3000/a"], target: "http://127.0.0.1:3000/a" });
 		assert.equal(first.ok, true, first.text);
 		const second = await h.session.run({ tool: "nuclei", args: ["-u", "http://127.0.0.1:3000/b"], target: "http://127.0.0.1:3000/b" });
@@ -194,7 +195,7 @@ test("the daily cap stops the run instead of queueing it", async () => {
 test("evidence records the execution before and after the tool runs", async () => {
 	const h = await harness();
 	try {
-		await h.session.scope({ file: join(h.dir, "scope.yaml"), confirm: true });
+		await h.session.scope({ file: join(h.dir, "scope.yaml"), confirm: async () => true });
 		await h.session.run({ tool: "httpx", args: ["-u", "http://127.0.0.1:3000/"], target: "http://127.0.0.1:3000/" });
 		const listed = await h.session.evidence({ action: "list" });
 		assert.match(listed.text, /execution/);
@@ -209,7 +210,7 @@ test("evidence records the execution before and after the tool runs", async () =
 test("a failing tool is reported as failed, not as success", async () => {
 	const h = await harness({ exitCode: 2 });
 	try {
-		await h.session.scope({ file: join(h.dir, "scope.yaml"), confirm: true });
+		await h.session.scope({ file: join(h.dir, "scope.yaml"), confirm: async () => true });
 		const result = await h.session.run({ tool: "httpx", args: ["-u", "http://127.0.0.1:3000/"], target: "http://127.0.0.1:3000/" });
 		assert.equal(result.ok, false);
 		assert.match(result.text, /terminó con código 2/);
@@ -221,7 +222,7 @@ test("a failing tool is reported as failed, not as success", async () => {
 test("redaction is off by default: test credentials reach the model", async () => {
 	const h = await harness({ stdout: "Cookie: session=topsecret123" });
 	try {
-		await h.session.scope({ file: join(h.dir, "scope.yaml"), confirm: true });
+		await h.session.scope({ file: join(h.dir, "scope.yaml"), confirm: async () => true });
 		const result = await h.session.run({ tool: "httpx", args: ["-u", "http://127.0.0.1:3000/"], target: "http://127.0.0.1:3000/" });
 		assert.match(result.text, /topsecret123/);
 	} finally {
@@ -232,7 +233,7 @@ test("redaction is off by default: test credentials reach the model", async () =
 test("redaction can be turned on explicitly", async () => {
 	const h = await harness({ stdout: "Cookie: session=topsecret123", redaction: "on" });
 	try {
-		await h.session.scope({ file: join(h.dir, "scope.yaml"), confirm: true });
+		await h.session.scope({ file: join(h.dir, "scope.yaml"), confirm: async () => true });
 		const result = await h.session.run({ tool: "httpx", args: ["-u", "http://127.0.0.1:3000/"], target: "http://127.0.0.1:3000/" });
 		assert.ok(!result.text.includes("topsecret123"), result.text);
 	} finally {
@@ -243,12 +244,22 @@ test("redaction can be turned on explicitly", async () => {
 test("findings flow through the lifecycle and rewrite status.md", async () => {
 	const h = await harness();
 	try {
-		await h.session.scope({ file: join(h.dir, "scope.yaml"), confirm: true });
+		await h.session.scope({ file: join(h.dir, "scope.yaml"), confirm: async () => true });
 		const created = await h.session.finding({ action: "create", title: "IDOR en facturas", class: "idor", endpoint: "/api/v1/invoices/1234" });
 		assert.match(created.text, /F-0001/);
 		const duplicate = await h.session.finding({ action: "create", title: "otra vez", class: "idor", endpoint: "/api/v1/invoices/1234" });
 		assert.match(duplicate.text, /Ya lo tenía: F-0001/);
-		const verified = await h.session.finding({ action: "update", id: "F-0001", state: "verified", reason: "reproducido dos veces" });
+		// The verifier runs in its own session (S66); here it shares the workspace.
+		const verifier = createSession(
+			{ root: h.dir, program: "lab", verifier: true },
+			{
+				dns: async () => ({ cname: [] }),
+				readFile: async (path: string) => readFile(path, "utf8"),
+				runTool: async () => ({ exitCode: 0, stdout: "ok", stderr: "" }),
+				confirm: async () => true,
+			},
+		);
+		const verified = await verifier.finding({ action: "update", id: "F-0001", state: "verified", reason: "reproducido dos veces" });
 		assert.equal(verified.ok, true, verified.text);
 		const text = await statusText(h);
 		assert.match(text, /F-0001\*\* IDOR en facturas — confirmado/);
@@ -260,7 +271,7 @@ test("findings flow through the lifecycle and rewrite status.md", async () => {
 test("a sensitive third-party secret is flagged in status.md, not blocked", async () => {
 	const h = await harness();
 	try {
-		await h.session.scope({ file: join(h.dir, "scope.yaml"), confirm: true });
+		await h.session.scope({ file: join(h.dir, "scope.yaml"), confirm: async () => true });
 		await h.session.finding({ action: "create", title: "Stripe key en bundle", class: "secret-exposure", endpoint: "/static/app.js", sensitive: true });
 		const text = await statusText(h);
 		assert.match(text, /hallazgo sensible — revisar antes de reportar/);
@@ -272,7 +283,7 @@ test("a sensitive third-party secret is flagged in status.md, not blocked", asyn
 test("a phase transition rewrites status.md and bounty_status returns the same text", async () => {
 	const h = await harness();
 	try {
-		await h.session.scope({ file: join(h.dir, "scope.yaml"), confirm: true });
+		await h.session.scope({ file: join(h.dir, "scope.yaml"), confirm: async () => true });
 		const phase = await h.session.phase({ phase: "hypothesis", nextStep: "validar la hipótesis del login" });
 		assert.match(phase.text, /Fase actual:\*\* hypothesis/);
 		const status = await h.session.status();
@@ -301,7 +312,7 @@ test("a spent tool budget stops the run and says so in status.md", async () => {
 				confirm: async () => true,
 			} as never,
 		);
-		await session.scope({ file: join(dir, "scope.yaml"), confirm: true });
+		await session.scope({ file: join(dir, "scope.yaml"), confirm: async () => true });
 		const first = await session.run({ tool: "httpx", args: ["-u", "http://127.0.0.1:3000/a"], target: "http://127.0.0.1:3000/a" });
 		assert.equal(first.ok, true, first.text);
 		const second = await session.run({ tool: "httpx", args: ["-u", "http://127.0.0.1:3000/b"], target: "http://127.0.0.1:3000/b" });
@@ -327,7 +338,7 @@ test("emergency stop kills children, keeps evidence consistent and refuses furth
 			runTool: async () => ({ exitCode: 0, stdout: "ok", stderr: "" }),
 			confirm: async () => true,
 		} as never);
-		await session.scope({ file: join(dir, "scope.yaml"), confirm: true });
+		await session.scope({ file: join(dir, "scope.yaml"), confirm: async () => true });
 		await session.run({ tool: "httpx", args: ["-u", "http://127.0.0.1:3000/"], target: "http://127.0.0.1:3000/" });
 		session.stopController.register({ pid: 4321, kill: () => (killed.push(4321), true) });
 		const stopped = await session.stop("prueba de parada");
