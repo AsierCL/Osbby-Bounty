@@ -10,6 +10,7 @@
  * `dns` resolver (a runner passes the snapshot it used); `deps.readFile` is always authoritative so a
  * caller cannot fake a list file's contents.
  */
+import { DEFAULT_FETCH_ALLOW, isFetchAllowed } from "./fetch-allow.ts";
 import { evaluate, type ScopePolicy } from "./scope.ts";
 import { parseLooseHost, parseTarget, type Target } from "./target.ts";
 
@@ -23,6 +24,8 @@ export type DnsResolver = (host: string) => Promise<DnsAnswer | { error: string 
 export interface GateDeps {
 	dns: DnsResolver;
 	readFile: (path: string) => Promise<string>;
+	/** S33: operator-level download allowlist. Defaults to DEFAULT_FETCH_ALLOW. */
+	fetchAllow?: readonly string[];
 }
 
 export interface GateRequest {
@@ -35,7 +38,7 @@ export interface GateRequest {
 	dns?: DnsResolver;
 }
 
-export type ContactSource = "target" | "argv" | "list" | "header-host" | "cname";
+export type ContactSource = "target" | "argv" | "list" | "header-host" | "cname" | "fetch";
 
 export interface Contact {
 	host: string;
@@ -100,8 +103,14 @@ function headerValue(headers: Record<string, string> | undefined, name: string):
 async function collectFromArgv(
 	argv: string[],
 	readFile: (path: string) => Promise<string>,
-): Promise<{ parsed: ParsedContact[]; skipped: string[]; problem?: { reason: string; detail?: string } }> {
+): Promise<{
+	parsed: ParsedContact[];
+	fetches: ParsedContact[];
+	skipped: string[];
+	problem?: { reason: string; detail?: string };
+}> {
 	const parsed: ParsedContact[] = [];
+	const fetches: ParsedContact[] = [];
 
 	// S24: every token that parses as a host, URL or IP is validated wherever it appears, with no
 	// per-tool profile. A token that does not parse as a host is not a host: it is noted and does not
@@ -124,13 +133,14 @@ async function collectFromArgv(
 			const inline = token.includes("=") ? token.slice(token.indexOf("=") + 1) : undefined;
 			const path = inline ?? argv[index + 1];
 			if (inline === undefined) index += 1;
-			if (!path) return { parsed, skipped, problem: { reason: `list flag ${token} has no file` } };
+			if (!path) return { parsed, fetches, skipped, problem: { reason: `list flag ${token} has no file` } };
 			let text: string;
 			try {
 				text = await readFile(path);
 			} catch (error) {
 				return {
 					parsed,
+					fetches,
 					skipped,
 					problem: { reason: `cannot read list file ${path}`, detail: (error as Error).message },
 				};
@@ -144,7 +154,17 @@ async function collectFromArgv(
 		}
 
 		if (FILE_FLAGS.has(token) || FILE_FLAGS.has(token.split("=")[0] ?? "")) {
+			// S33: a file flag usually holds a local path, which is not validated. But if the value is
+			// a scheme-qualified URL the tool is going to *fetch* it, and that is network traffic.
+			const inline = token.includes("=") ? token.slice(token.indexOf("=") + 1) : argv[index + 1];
 			if (!token.includes("=")) index += 1;
+			if (typeof inline === "string" && /^[a-z][a-z0-9+.-]*:\/\//i.test(inline)) {
+				const target = canonical(inline);
+				if (target === null) {
+					return { parsed, fetches, skipped, problem: { reason: `file flag value is not parseable: ${inline}` } };
+				}
+				fetches.push({ contact: { host: target.host, source: "fetch", raw: inline }, target });
+			}
 			continue;
 		}
 
@@ -176,7 +196,7 @@ async function collectFromArgv(
 		}
 	}
 
-	return { parsed, skipped };
+	return { parsed, fetches, skipped };
 }
 
 export async function gate(policy: ScopePolicy, request: GateRequest, deps: GateDeps): Promise<GateResult> {
@@ -268,6 +288,27 @@ export async function gate(policy: ScopePolicy, request: GateRequest, deps: Gate
 			allowed: false,
 			reason: `no in_scope rule matched ${entry.contact.host}${entry.target.port === null ? "" : `:${entry.target.port}`}`,
 			detail: `${verdict.reason} (reached via ${entry.contact.source} ${JSON.stringify(entry.contact.raw)})`,
+			contacts: unique.map((item) => item.contact),
+		};
+	}
+
+	// 7b. S33: downloads requested through a file flag. In scope is fine; otherwise fetch_allow may
+	// cover it, which never widens the scope for actual targets.
+	const fetchAllow = deps.fetchAllow ?? DEFAULT_FETCH_ALLOW;
+	for (const entry of fromArgv.fetches) {
+		const verdict = evaluate(policy, entry.target);
+		if (verdict.verdict === "in") {
+			notes.push(`download of ${entry.contact.host} is inside the scope`);
+			continue;
+		}
+		if (isFetchAllowed(entry.contact.host, fetchAllow)) {
+			notes.push(`download of ${entry.contact.host} allowed by fetch_allow (not a target in scope)`);
+			continue;
+		}
+		return {
+			allowed: false,
+			reason: `file flag value is a URL outside the scope and outside fetch_allow: ${entry.contact.host}`,
+			detail: `${entry.contact.raw} would be downloaded, and fetch_allow only allows ${fetchAllow.join(", ")}`,
 			contacts: unique.map((item) => item.contact),
 		};
 	}
