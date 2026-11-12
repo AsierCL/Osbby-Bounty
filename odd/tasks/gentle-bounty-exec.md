@@ -1027,3 +1027,38 @@ verlo con la evidencia del punto 1 en la mano antes de confirmarlo, no solo "tes
 
 Próximo checkpoint: tras cerrar 1-3. Mismo formato de informe. Pará y esperá ahí.
 ```
+
+### L14 — S41 cerrado (verde), S44 cerrado, S42 y S43 bloqueados por decisión
+
+**S41 — subagente hijo: CERRADO.** Corrida real de un `pi` hijo (no el stub) con la allowlist del
+asset `bounty-recon`, contra el repo y el lab local. Pi reportó en `agent_end.toolsAdded` exactamente:
+
+```
+read, grep, find, ls, bounty_run, bounty_scope, bounty_evidence, bounty_phase, bounty_status
+```
+
+Cero tools de más. Evidencia: `docs/evidence/subagent-bounty-recon-tools.md`. Además, test
+determinista nuevo (`tests/agent-assets.test.ts`) que compara la allowlist declarada en cada asset
+contra la allowlist del runner. El runner ahora parsea `agent_end.toolsAdded` (antes solo entendía el
+evento del stub, así que la verificación real habría sido ciega).
+
+**S44 — hueco de wordlists: DOCUMENTADO.** `docs/gate.md` tiene la tabla con los cuatro casos
+(`-P /tmp/words.txt`, `-P https://otro.com/words.txt`, `-w http://…`, `-L otro.com`) y el arreglo
+natural (extender S33 a wordlists). Sin arreglar, como se pidió.
+
+**S43 — pausa destructiva: PARCIAL.** Verificado con proceso real a través de la extensión real
+(`tests/extension.test.ts`: respondido no ⇒ no ejecuta; respondido sí ⇒ ejecuta, con marcador).
+Verificado que Pi real carga la extensión. **NO verificado** el diálogo de Pi y la tecla humana: el
+modo RPC documenta el diálogo pero no expone invocación de tools sin modelo, y tres corridas con
+modelo fueron inconclusas (dos veces el modelo exploró en vez de llamar; una llamó antes del preload,
+bug corregido). Detalle y procedimiento manual: `docs/evidence/confirm-live.md`.
+
+**S42 — CVSS v4.0: BLOQUEADO POR DECISIÓN.** El cálculo oficial necesita la tabla de lookup de
+MacroVectores de la v4.0. No está en el repo ni en el host, y el dato de referencia vive en un repo
+que **no** está en la lista de Fase F (S21a prohíbe ampliarla sin OK). Opciones planteadas al humano:
+autorizar los datos oficiales de FIRST con registro de licencia, aportar los vectores de referencia,
+o aceptar score manual como deuda.
+
+**S46 — deuda:** skills de `gentle-pi` contaminando el contexto ⇒ `docs/DEUDA.md` §1.
+
+Estado: **232 tests, 0 fallos**.
