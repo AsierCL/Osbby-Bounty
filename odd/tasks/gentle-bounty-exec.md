@@ -556,6 +556,49 @@ Cuando tenga el resultado de mi prueba manual y confirmes el guardarraíl del pu
 decisión final de GO/NO-GO por escrito. No caragues ningún scope real hasta esa confirmación.
 ```
 
+### S51 — Fase F, URLs nuevas y advertencia de supply chain (enmienda a S49)
+
+```
+1. S49 — las dos URLs que faltaban, con una advertencia:
+   - Claude-BugHunter real parece ser github.com/elementalsouls/Claude-BugHunter (no
+     vavkamil/Claude-BugHunter, que ya confirmaste 404).
+   - El bundle de 82 skills que mencionaba enterprisedna.co puede ser el mismo repo o uno distinto;
+     confirmalo vos mismo al clonar, no asumas.
+   ADVERTENCIA antes de tocarlo: busqué este repo y distintos directorios de catálogo de skills
+   (skills.sh, skillselion, sourcepulse, claudeskills.info) le atribuyen números de skills, stars e
+   instalaciones completamente contradictorios entre sí para lo que dicen ser el mismo repo —
+   incluida una cifra de stars casi con certeza falsa en una de las fuentes. Esa inconsistencia
+   entre agregadores es una señal de alerta de supply-chain por sí sola. Tratalo con el mismo nivel
+   de sospecha que le diste a H-mmer, incluso si termina teniendo licencia válida: licencia, qué
+   hace el código real (no el README), si su install.sh baja algo con pipx/curl antes de ejecutarlo
+   (no lo ejecutes), y si su "7-Question Gate" / enforcement de scope es real o solo texto de
+   marketing. Mismo veredicto de siempre: adaptar ideas y estructura de skills si se sostienen bajo
+   inspección, nunca copiar código ni correr sus instaladores.
+```
+
+### S52 — Anclaje CVSS vía API de NVD (enmienda a S50)
+
+```
+2. S50 — anclaje CVSS: NO uses ningún vector/score de memoria ni de blogs de terceros, encontré
+   fuentes contradictorias sobre si NVD publicó v4.0 para los CVEs conocidos que probé. En su lugar,
+   extensión puntual de S21a (autorizada ahora, una sola vez): hacé un GET de solo lectura a
+   https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=<CVE-ID> (API oficial de NIST, JSON
+   estructurado, sin ejecutar nada). Elegí un CVE conocido y revisá la respuesta: si tiene una
+   entrada en metrics.cvssMetricV40 con type:"Primary" y source:"nvd@nist.gov", ese vector+score es
+   tu segundo anclaje — guardá el JSON completo como evidencia en docs/evidence/ con la URL y fecha
+   de consulta. Si el primer CVE que probás no tiene v4.0 primary, probá con otro — no fuerces el
+   que no tiene. Un solo GET, nada de scraping masivo.
+```
+
+### S53 — S43 sigue abierto; próximo checkpoint
+
+```
+3. S48 sigue abierto. Yo corro la prueba manual y te confirmo el resultado antes del siguiente
+   checkpoint.
+
+Próximo checkpoint: cuando cierres 1 y 2, y cuando yo te confirme S43. Pará y esperá como siempre.
+```
+
 ## Tasks
 
 | ID | Tarea | Spec | Ruta | Commit |
@@ -1185,3 +1228,64 @@ voy a adivinar owners. Detalle en `docs/prior-art.md`.
 **S50 — segundo anclaje CVSS: bloqueado.** Necesito un par vector+score **publicado** para anclarlo.
 El host no consulta NVD (S1) y no voy a inventar un score de memoria. Con que me pases un vector con
 su score publicado, lo agrego en un minuto.
+
+### L18 — Checkpoint 6: enmiendas S51-S53 (verbatim)
+
+```text
+Checkpoint 6 recibido. S47 CERRADO. S49 continúa. S50 resuelto con instrucción nueva. S48/S43 sigue
+pendiente de mí — todavía no corrí la prueba manual, te aviso en cuanto la haga. No cargues ningún
+scope real todavía.
+
+1. S49 — las dos URLs que faltaban, con una advertencia:
+   - Claude-BugHunter real parece ser github.com/elementalsouls/Claude-BugHunter (no
+     vavkamil/Claude-BugHunter, que ya confirmaste 404).
+   - El bundle de 82 skills que mencionaba enterprisedna.co puede ser el mismo repo o uno distinto;
+     confirmalo vos mismo al clonar, no asumas.
+   ADVERTENCIA antes de tocarlo: busqué este repo y distintos directorios de catálogo de skills
+   (skills.sh, skillselion, sourcepulse, claudeskills.info) le atribuyen números de skills, stars e
+   instalaciones completamente contradictorios entre sí para lo que dicen ser el mismo repo —
+   incluida una cifra de stars casi con certeza falsa en una de las fuentes. Esa inconsistencia
+   entre agregadores es una señal de alerta de supply-chain por sí sola. Tratalo con el mismo nivel
+   de sospecha que le diste a H-mmer, incluso si termina teniendo licencia válida: licencia, qué
+   hace el código real (no el README), si su install.sh baja algo con pipx/curl antes de ejecutarlo
+   (no lo ejecutes), y si su "7-Question Gate" / enforcement de scope es real o solo texto de
+   marketing. Mismo veredicto de siempre: adaptar ideas y estructura de skills si se sostienen bajo
+   inspección, nunca copiar código ni correr sus instaladores.
+
+2. S50 — anclaje CVSS: NO uses ningún vector/score de memoria ni de blogs de terceros, encontré
+   fuentes contradictorias sobre si NVD publicó v4.0 para los CVEs conocidos que probé. En su lugar,
+   extensión puntual de S21a (autorizada ahora, una sola vez): hacé un GET de solo lectura a
+   https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=<CVE-ID> (API oficial de NIST, JSON
+   estructurado, sin ejecutar nada). Elegí un CVE conocido y revisá la respuesta: si tiene una
+   entrada en metrics.cvssMetricV40 con type:"Primary" y source:"nvd@nist.gov", ese vector+score es
+   tu segundo anclaje — guardá el JSON completo como evidencia en docs/evidence/ con la URL y fecha
+   de consulta. Si el primer CVE que probás no tiene v4.0 primary, probá con otro — no fuerces el
+   que no tiene. Un solo GET, nada de scraping masivo.
+
+3. S48 sigue abierto. Yo corro la prueba manual y te confirmo el resultado antes del siguiente
+   checkpoint.
+
+Próximo checkpoint: cuando cierres 1 y 2, y cuando yo te confirme S43. Pará y esperá como siempre.
+```
+
+### L19 — S49 cerrado con tercer repo, S50 bloqueado con evidencia
+
+**S49 — Fase F: CERRADO.** Tres repos revisados en solo lectura, nada incorporado:
+
+- `shuvonsec/claude-bug-bounty` (MIT): scope check en código y tests de falsos positivos; sin cadena de
+  evidencia; README instala con `curl | sh` (no ejecutado).
+- `H-mmer/pentest-agents` (**sin licencia**): enforcement real con tests; nada copiable.
+- `elementalsouls/Claude-BugHunter` (**MIT + CC-BY-4.0**): 83 `SKILL.md` (es el bundle "82 skills").
+  Su "7-Question Gate" es código real pero **valida texto, no alcance** (Q3 se satisface si el markdown
+  dice "scope"). Y `skills/hunt-llm-ai/SKILL.md:34` contiene un payload de inyección literal
+  (`Ignore previous instructions…`): cargar esa skill es un vector real. No se copia nada de ahí.
+
+`vavkamil/Claude-BugHunter` y `elementalsouls/Claude-Bug-Bounty` dan 404; el repo correcto es
+`elementalsouls/Claude-BugHunter`.
+
+**S50 — segundo anclaje CVSS: BLOQUEADO con evidencia.** Cuatro GET de solo lectura a la API oficial de
+NVD (`CVE-2021-44228`, `CVE-2024-3400`, `CVE-2023-44487`, `CVE-2024-3094`): **ninguno tiene
+`metrics.cvssMetricV40`**, ni primary ni secondary. JSONs crudos en `docs/evidence/nvd/` con URL y
+fecha. No se forzó ningún vector ni se inventó un score, y no se siguió barriendo.
+
+**S48 — S43 sigue pendiente del humano.** Sin cambios.
