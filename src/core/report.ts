@@ -7,6 +7,7 @@
  * CVSS: this renderer takes a v4.0 vector and score that were already validated; it does not compute
  * scores. A full CVSS v4.0 calculator is a separate unit and is reported as pending, not faked.
  */
+import { parseVector, scoreVector } from "./cvss.ts";
 import type { Finding } from "./findings.ts";
 import type { EvidenceRecord } from "./evidence.ts";
 
@@ -19,26 +20,30 @@ export interface ReportInput {
 	remediation: string;
 }
 
-const VECTOR = /^CVSS:4\.0\/((AV:[NALP]|AC:[LH]|AT:[NP]|PR:[NLH]|UI:[NPA]|VC:[HLN]|VI:[HLN]|VA:[HLN]|SC:[HLN]|SI:[HLN]|SA:[HLN])\/?)+$/;
-
+/** A vector is valid when the CVSS parser accepts it: shape and metric values, both. */
 export function validateVector(vector: string): boolean {
-	return VECTOR.test(vector.trim());
+	return parseVector(vector).ok;
 }
 
 const REQUIRED_SECTIONS = ["Título", "Severidad", "Resumen", "Pasos de reproducción", "Evidencia", "Impacto", "Remediación"];
 
 export function renderReport(input: ReportInput): string {
 	const { finding } = input;
-	const severity =
-		finding.cvss === null || finding.score === null
-			? "sin puntuar todavía"
-			: `${finding.score.toFixed(1)} — ${finding.cvss}`;
+	// S42: the score is computed from the vector, never taken from a hand-written field.
+	const computed = finding.cvss === null ? null : scoreVector(finding.cvss);
+	const scored = computed !== null && "score" in computed ? computed : null;
+	const severity = scored === null ? "sin puntuar todavía" : `${scored.score.toFixed(1)} (${scored.severity}) — ${finding.cvss}`;
+	const scoreMismatch =
+		scored !== null && finding.score !== null && Math.abs(finding.score - scored.score) > 0.049
+			? `el score guardado (${finding.score.toFixed(1)}) no coincide con el calculado (${scored.score.toFixed(1)}); vale el calculado`
+			: null;
 	const lines: string[] = [];
 	lines.push(`# ${finding.title}`, "");
 	lines.push(`**Severidad:** ${severity}`);
 	lines.push(`**Clase:** ${finding.class}`);
 	lines.push(`**Endpoint:** ${finding.endpoint}${finding.parameter === null ? "" : ` (parámetro ${finding.parameter})`}`);
 	lines.push(`**Programa:** ${input.program}`);
+	if (scoreMismatch !== null) lines.push(`**Aviso:** ${scoreMismatch}`);
 	lines.push(`**Estado:** ${finding.state}`, "");
 	lines.push("## Resumen", "");
 	lines.push(finding.notes[0] ?? finding.title, "");

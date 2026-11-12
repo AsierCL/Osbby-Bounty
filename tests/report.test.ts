@@ -5,6 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+import { scoreVector } from "../src/core/cvss.ts";
 import { renderReport, validateReport, validateVector } from "../src/core/report.ts";
 import type { Finding } from "../src/core/findings.ts";
 
@@ -44,12 +45,23 @@ function report(overrides: Partial<Parameters<typeof renderReport>[0]> = {}) {
 test("the canonical report carries severity, steps, hashes, impact and remediation", () => {
 	const markdown = report();
 	assert.match(markdown, /^# IDOR en facturas/m);
-	assert.match(markdown, /\*\*Severidad:\*\* 8\.7 — CVSS:4\.0\//);
+	// S42: the report computes the score from the vector; 8.7 is no longer taken on faith.
+	const computed = scoreVector(finding.cvss as string);
+	assert.ok(!("ok" in computed));
+	if (!("ok" in computed)) {
+		assert.match(markdown, new RegExp(`\\*\\*Severidad:\\*\\* ${computed.score.toFixed(1)} \\(`));
+	}
+	assert.ok(!markdown.includes("Aviso:"), "the stored score matches the computed one, so no warning");
 	assert.match(markdown, /^1\. GET \/api\/invoices\/1/m);
 	assert.match(markdown, /sha256 a{16}/);
 	assert.match(markdown, /## Impacto/);
 	assert.match(markdown, /## Remediación/);
 	assert.deepEqual(validateReport(markdown), { ok: true, missing: [] });
+});
+
+test("a stored score that disagrees with the vector is flagged, and the computed one wins", () => {
+	const markdown = report({ finding: { ...finding, score: 1.0 } });
+	assert.match(markdown, /\*\*Aviso:\*\* el score guardado \(1\.0\) no coincide con el calculado/);
 });
 
 test("a report without a CVSS vector is rejected by the checklist", () => {

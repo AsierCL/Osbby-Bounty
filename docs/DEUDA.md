@@ -26,13 +26,17 @@ El mecanismo está verificado con proceso real y con la firma documentada de `ct
 falta verificar es el diálogo de Pi y la tecla del humano. Detalle, intentos fallidos y procedimiento
 manual: `docs/evidence/confirm-live.md`.
 
-## 4. CVSS v4.0 no calcula (S42, bloqueado por decisión)
+## 4. CVSS v4.0: cerrado, con dos límites
 
-`src/core/report.ts` valida la forma del vector y transporta un score puesto a mano. El cálculo
-oficial requiere la tabla de lookup de MacroVectores de la especificación v4.0, que no está en este
-repo ni en el host. Opciones: usar los datos de referencia oficiales de FIRST (repo **no** listado en
-Fase F, licencia BSD-2, con registro de licencia) o que el humano aporte los vectores de referencia.
-Pendiente de decisión. **Es el único punto que impide un reporte con severidad defendible.**
+Implementado y calculando (S42). Límites conocidos, no deuda de cálculo:
+
+- **Métricas modificadas (`M*`) no soportadas**: se rechazan con error en vez de ignorarlas, porque
+  ignorarlas cambiaría el score en silencio. Si un programa exige vectores ambientales, hay que
+  portarlas.
+- **Cobertura de vectores publicados**: los anclajes son los que fija la especificación (0.0 sin
+  impacto, 10.0 máximo) más el vector base de Log4Shell (9.3) y las invariantes del algoritmo. No hay
+  una batería de 10 scores publicados de CVE: el host no consulta NVD (S1). Si hace falta más
+  cobertura, la vía es que el humano aporte vectores con su score publicado.
 
 ## 5. Atafetas de test en la extensión (S43)
 

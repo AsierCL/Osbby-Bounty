@@ -1062,3 +1062,30 @@ o aceptar score manual como deuda.
 **S46 — deuda:** skills de `gentle-pi` contaminando el contexto ⇒ `docs/DEUDA.md` §1.
 
 Estado: **232 tests, 0 fallos**.
+
+### L15 — S41 cerrado, S42 cerrado, S43 parcial, S44 documentado
+
+**S41 — subagente hijo: VERDE.** `pi` real, allowlist del asset `bounty-recon`, evidencia en
+`docs/evidence/subagent-bounty-recon-tools.md`: reportó exactamente las 9 tools declaradas, cero de
+más. El runner ahora parsea `agent_end.toolsAdded` (antes la verificación real habría sido ciega) y
+`tests/agent-assets.test.ts` cruza cada asset contra la allowlist del runner.
+
+**S42 — CVSS v4.0: VERDE.** Algoritmo porteado (`src/core/cvss.ts`) con las tablas oficiales de FIRST
+vendoreadas (`src/core/cvss-data.ts`, BSD-2, registrado en `docs/prior-art.md`). `report.ts` calcula
+el score desde el vector y avisa si el guardado no coincide. 7 tests: extremos de la spec, vector base
+de Log4Shell (9.3), tabla oficial de 270 entradas, invariante "la interpolación nunca supera el
+MacroVector", monotonicidad, y rechazos del parser. Límite declarado: métricas `M*` se rechazan.
+
+**S43 — pausa destructiva: PARCIAL, no verde.** Verificado con la extensión real y proceso real:
+respondido no ⇒ el binario no corre; respondido sí ⇒ corre (marcador). Evidencia de Pi real cargando
+la extensión y su lista de tools. **NO verificado**: el diálogo de Pi y la tecla del humano. El modo
+RPC documenta el diálogo pero no expone invocación de tools sin modelo; tres corridas con modelo
+fueron inconclusas. Procedimiento manual de 2 minutos en `docs/evidence/confirm-live.md`.
+
+**S44 — wordlists: VERDE (documentado).** `docs/gate.md` con tabla de cuatro casos y el arreglo
+natural, igual de visible que el hueco de `-o/-t`.
+
+**S45 — Fase F: pendiente.** `docs/prior-art.md` quedó creado con la entrada de licencia de CVSS; la
+revisión de los cuatro repos de bounty sigue sin hacer.
+
+Estado: **241 tests, 0 fallos**.
