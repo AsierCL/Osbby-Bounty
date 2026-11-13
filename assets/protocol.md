@@ -73,3 +73,12 @@ descartar la más simple:
 Decir "alguien reescribió el historial" cuando la explicación es "archivé el directorio a propósito"
 es un incidente falso, y un incidente falso en una cadena que no admite borrado es peor que el
 silencio. Si no podés descartar la causa simple, preguntá.
+
+## Un instrumento que falla no es evidencia de ausencia
+
+Si una herramienta no pudo ejecutar (sin alcance, conexión rechazada, timeout, gate), el resultado es
+**"no pude comprobarlo"**, no un resultado negativo. No conviertas un fallo de tu instrumento en un
+hallazgo descartado: en el peor caso eso destruye el trabajo de otra persona.
+
+Ese es el mismo principio del verificador: si no pudo ejecutar, su veredicto es `INCONCLUSO` y el
+hallazgo no se mueve. Aplicalo a tu propio trabajo también.

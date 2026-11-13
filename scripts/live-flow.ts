@@ -19,6 +19,7 @@ import { createEvidenceStore } from "../src/core/evidence.ts";
 import { createSession } from "../src/pi/session.ts";
 import { createPiRunner } from "../src/pi/runner.ts";
 import { parseVerdict, verifierTaskFor } from "../src/pi/verifier.ts";
+import { extractProse } from "./lib/prose.ts";
 
 const root = process.cwd();
 const program = "lab-flow";
@@ -75,7 +76,7 @@ const result = await runner.run({
 	agent: { name: "bounty-verify", tools },
 	task: verifierTaskFor({ id: findingId }, await store.read()),
 	cwd: root,
-	env: { GENTLE_BOUNTY_ROOT: root },
+	env: { GENTLE_BOUNTY_ROOT: root, GENTLE_BOUNTY_PROGRAM: program },
 	timeoutMs: 20 * 60 * 1000,
 });
 const verdict = parseVerdict(result.output);
@@ -121,24 +122,19 @@ const reporter = await runner.run({
 	env: { GENTLE_BOUNTY_ROOT: root },
 	timeoutMs: 10 * 60 * 1000,
 });
-const prose = (() => {
-	const raw = reporter.output.replace(/^```(?:json)?/m, "").replace(/```$/m, "").trim();
-	const start = raw.indexOf("{");
-	const end = raw.lastIndexOf("}");
-	if (start < 0 || end <= start) return null;
-	try {
-		return JSON.parse(raw.slice(start, end + 1)) as Record<string, unknown>;
-	} catch {
-		return null;
-	}
-})();
+const extracted = extractProse(reporter.output);
+const prose = extracted.value as Record<string, unknown> | null;
 console.log(
 	`6. reporter (modelo): exit=${String(reporter.exitCode)} ${Math.round((Date.now() - started) / 1000)}s · tools=${reporter.activeTools.join(",")} · JSON ${prose === null ? "ILEGIBLE" : "ok"}`,
 );
+console.log(`   extracción: ${extracted.strategy}${extracted.diagnosis.length > 0 ? ` — ${extracted.diagnosis}` : ""}`);
 if (prose === null) {
-	console.log("   el modelo no devolvió JSON: no escribo el reporte con prosa inventada.");
+	console.log(`   el modelo no devolvió JSON: ${extracted.diagnosis}. No escribo el reporte con prosa inventada.`);
 	process.exit(1);
 }
+// Saved so the report can be re-rendered without another model call.
+await mkdir(join(root, "work", program, "reports"), { recursive: true });
+await writeFile(join(root, "work", program, "reports", `${findingId}.prose.json`), JSON.stringify(prose, null, "\t") + "\n", "utf8");
 const report = await session.report({
 	findingId,
 	metrics: { AV: "N", AC: "L", AT: "N", PR: "N", UI: "N", VC: "H", VI: "N", VA: "N", SC: "N", SI: "N", SA: "N" },

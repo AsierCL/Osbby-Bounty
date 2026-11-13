@@ -128,6 +128,28 @@ export default function bountyExtension(pi: PiLike): void {
 		}
 	}
 
+	/**
+	 * S76/task 1: a child launched by the runner gets GENTLE_BOUNTY_PROGRAM. It is the default for every
+	 * tool call and the only program those tools will accept: a verifier that wandered into another
+	 * program's scope is exactly the failure this closes.
+	 */
+	function resolveProgram(requested: unknown): { ok: true; program: string } | { ok: false; text: string } {
+		const locked = process.env.GENTLE_BOUNTY_PROGRAM;
+		const asked = requested === undefined || requested === null ? "" : String(requested).trim();
+		if (locked !== undefined && locked.length > 0) {
+			if (asked.length === 0) return { ok: true, program: locked };
+			if (asked !== locked) {
+				return {
+					ok: false,
+					text: `Programa no permitido en esta sesión: pediste "${asked}" y esta sesión es "${locked}". Un verificador no toca otros programas ni otros alcances.`,
+				};
+			}
+			return { ok: true, program: locked };
+		}
+		if (asked.length === 0) return { ok: false, text: "Falta el programa." };
+		return { ok: true, program: asked };
+	}
+
 	async function sessionFor(program: string): Promise<ProgramSession> {
 		const existing = sessions.get(program);
 		if (existing) return existing;
@@ -193,7 +215,9 @@ export default function bountyExtension(pi: PiLike): void {
 			required: ["program", "file"],
 		} as never,
 		async execute(_toolCallId, params, _signal, _onUpdate, context) {
-			const session = await sessionFor(String(params.program));
+			const resolved = resolveProgram(params.program);
+			if (!resolved.ok) return text(resolved.text, { ok: false });
+			const session = await sessionFor(resolved.program);
 			// S63: the model's `confirm` flag is not an answer. Only the human UI is.
 			const confirm = humanAsk(context, "Confirmar alcance", "Es la única vez que te voy a preguntar por este archivo de alcance.");
 			const result = await session.scope({ file: String(params.file), ...(confirm === undefined ? {} : { confirm }) });
@@ -221,7 +245,9 @@ export default function bountyExtension(pi: PiLike): void {
 			required: ["program", "tool", "args", "target"],
 		} as never,
 		async execute(_toolCallId, params, _signal, _onUpdate, context) {
-			const session = await sessionFor(String(params.program));
+			const resolved = resolveProgram(params.program);
+			if (!resolved.ok) return text(resolved.text, { ok: false });
+			const session = await sessionFor(resolved.program);
 			// B4: title names the class and the full command; "No" is the first option.
 			const confirm = humanAsk(
 				context,
@@ -257,7 +283,9 @@ export default function bountyExtension(pi: PiLike): void {
 			required: ["program", "action"],
 		} as never,
 		async execute(_toolCallId, params) {
-			const session = await sessionFor(String(params.program));
+			const resolved = resolveProgram(params.program);
+			if (!resolved.ok) return text(resolved.text, { ok: false });
+			const session = await sessionFor(resolved.program);
 			const result = await session.evidence({
 				action: params.action as "append" | "list" | "verify",
 				...(params.kind === undefined ? {} : { kind: String(params.kind) }),
@@ -290,7 +318,9 @@ export default function bountyExtension(pi: PiLike): void {
 			required: ["program", "action"],
 		} as never,
 		async execute(_toolCallId, params) {
-			const session = await sessionFor(String(params.program));
+			const resolved = resolveProgram(params.program);
+			if (!resolved.ok) return text(resolved.text, { ok: false });
+			const session = await sessionFor(resolved.program);
 			const result = await session.finding({
 				action: params.action as "create" | "update" | "list",
 				...(params.id === undefined ? {} : { id: String(params.id) }),
@@ -325,7 +355,9 @@ export default function bountyExtension(pi: PiLike): void {
 			required: ["program", "phase"],
 		} as never,
 		async execute(_toolCallId, params) {
-			const session = await sessionFor(String(params.program));
+			const resolved = resolveProgram(params.program);
+			if (!resolved.ok) return text(resolved.text, { ok: false });
+			const session = await sessionFor(resolved.program);
 			const result = await session.phase({
 				phase: params.phase as BountyPhase,
 				...(params.next_step === undefined ? {} : { nextStep: String(params.next_step) }),
@@ -345,7 +377,9 @@ export default function bountyExtension(pi: PiLike): void {
 			required: ["program"],
 		} as never,
 		async execute(_toolCallId, params) {
-			const result = await sessionFor(String(params.program)).stop(String(params.reason ?? "pedido del humano"));
+			const resolved = resolveProgram(params.program);
+			if (!resolved.ok) return text(resolved.text, { ok: false });
+			const result = await sessionFor(resolved.program).stop(String(params.reason ?? "pedido del humano"));
 			return text(result.text, { ok: result.ok });
 		},
 	});
@@ -362,13 +396,18 @@ export default function bountyExtension(pi: PiLike): void {
 			required: ["program", "finding_id"],
 		} as never,
 		async execute(_toolCallId, params) {
-			const program = String(params.program);
+			const resolved = resolveProgram(params.program);
+			if (!resolved.ok) return text(resolved.text, { ok: false });
+			const program = resolved.program;
 			const findingId = String(params.finding_id);
 			const session = await sessionFor(program);
 			const asset = await readFile(join(assetsDir, "agents", "bounty-verify.md"), "utf8");
 			const tools = (/^tools:\s*(.+)$/m.exec(asset)?.[1] ?? "").split(",").map((tool) => tool.trim()).filter(Boolean);
 			const store = createEvidenceStore(session.paths.evidenceDir, { now: () => Date.now() });
-			const task = verifierTaskFor({ id: findingId }, await store.read());
+			// S76/task 1: the task names the program and the absolute scope path, and the child gets the
+			// same name in its environment, which is also the only program its tools will accept.
+			const scopePath = session.paths.scopeFile() ?? join(root, "work", program, "scope.yaml");
+			const task = verifierTaskFor({ id: findingId }, await store.read(), { program, scopePath });
 			const timeoutMs = config?.budget?.maxWallMs ?? 15 * 60 * 1000;
 			const runner = createPiRunner({
 				piCommand: process.env.GENTLE_BOUNTY_PI ? [process.env.GENTLE_BOUNTY_PI] : ["pi"],
@@ -379,7 +418,7 @@ export default function bountyExtension(pi: PiLike): void {
 				agent: { name: "bounty-verify", tools },
 				task,
 				cwd: root,
-				env: { GENTLE_BOUNTY_ROOT: root },
+				env: { GENTLE_BOUNTY_ROOT: root, GENTLE_BOUNTY_PROGRAM: program },
 				timeoutMs,
 			});
 			const verdict = parseVerdict(result.output);
@@ -391,8 +430,14 @@ export default function bountyExtension(pi: PiLike): void {
 				verifierSessionId: result.sessionId,
 				invocationToken: result.invocationToken,
 			});
+			const declared = verdict === null ? "ILEGIBLE" : verdict.verdict;
+			const header = [
+				`Veredicto del verificador: ${declared}`,
+				`Veredicto efectivo: ${applied.effective ?? "INCONCLUSO"}${applied.converted ? " (convertido por el código)" : ""}`,
+				`Hallazgo: ${applied.state ?? "sin cambios"}`,
+			].join(" · ");
 			return text(
-				`${applied.text}\n\nVerificador: exit=${String(result.exitCode)} · ${Math.round(result.durationMs / 1000)}s · tools: ${result.activeTools.join(", ") || "(ninguna)"}`,
+				`${header}\n${applied.text}\n\nVerificador: exit=${String(result.exitCode)} · ${Math.round(result.durationMs / 1000)}s · tools: ${result.activeTools.join(", ") || "(ninguna)"}`,
 				{ ok: applied.ok },
 			);
 		},
@@ -423,7 +468,9 @@ export default function bountyExtension(pi: PiLike): void {
 			required: ["program", "finding_id", "metrics"],
 		} as never,
 		async execute(_toolCallId, params) {
-			const session = await sessionFor(String(params.program));
+			const resolved = resolveProgram(params.program);
+			if (!resolved.ok) return text(resolved.text, { ok: false });
+			const session = await sessionFor(resolved.program);
 			const metrics = (params.metrics ?? {}) as Record<string, string>;
 			const result = await session.report({
 				findingId: String(params.finding_id),
@@ -450,7 +497,9 @@ export default function bountyExtension(pi: PiLike): void {
 			required: ["program"],
 		} as never,
 		async execute(_toolCallId, params) {
-			const result = await (await sessionFor(String(params.program))).status();
+			const resolved = resolveProgram(params.program);
+			if (!resolved.ok) return text(resolved.text, { ok: false });
+			const result = await (await sessionFor(resolved.program)).status();
 			return text(result.text, { ok: result.ok });
 		},
 	});

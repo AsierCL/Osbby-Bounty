@@ -24,7 +24,8 @@ import { parseScope, evaluate, summarizeScope, type ScopePolicy } from "../core/
 import { scoreVector } from "../core/cvss.ts";
 import { extractEvidence, renderReport, validateReport, validateReportText } from "../core/report.ts";
 import { randomUUID } from "node:crypto";
-import { signExecution, verifyExecutionSignature } from "../core/attestation.ts";
+import { signExecution } from "../core/attestation.ts";
+import { decideVerdict, inspectVerifierExecutions } from "../core/verdict.ts";
 import { createStatusStore, renderStatus, writeStatusFile, type BountyPhase, type ProgramState, type StatusStore } from "../core/status.ts";
 
 export interface ProgramConfig {
@@ -65,10 +66,21 @@ export interface SessionDeps {
 export interface ToolResult {
 	ok: boolean;
 	text: string;
+	/** S76/task 2d: the verdict that actually applied, and whether it was converted. */
+	effective?: "REPRODUCIDO" | "NO_REPRODUCIDO" | "INCONCLUSO";
+	converted?: boolean;
+	state?: string;
 }
 
 export interface ProgramSession {
-	paths: { workspace: string; statusFile: string; evidenceDir: string; findingsDir: string };
+	paths: {
+		workspace: string;
+		statusFile: string;
+		evidenceDir: string;
+		findingsDir: string;
+		/** The scope file this session loaded, or null before the first load. */
+		scopeFile: () => string | null;
+	};
 	sessionId: string;
 	stopController: StopController;
 	/** D1: the only path that can move a finding to verified/rejected. Called by code, never by the model. */
@@ -178,7 +190,7 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 	}
 
 	return {
-		paths: { workspace, statusFile: status.file(), evidenceDir, findingsDir },
+		paths: { workspace, statusFile: status.file(), evidenceDir, findingsDir, scopeFile: () => scopePath },
 		sessionId,
 		stopController,
 
@@ -186,79 +198,60 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			const finding = await findings.get(input.findingId);
 			if (!finding) return { ok: false, text: `No existe el hallazgo ${input.findingId}.` };
 
-			const settle = async (event: string, detail: string, applied: boolean): Promise<ToolResult> => {
-				await evidence.append({
-					kind: "verification",
-					payload: { event, finding: input.findingId, verdict: input.verdict, seqs: input.seqs, verifierSessionId: input.verifierSessionId, detail, at: new Date(now()).toISOString(), sessionId },
-				});
-				await status.setLastVerification({ at: new Date(now()).toISOString(), finding: input.findingId, event, detail });
-				await status.note(`verificación ${input.findingId}: ${event} — ${detail}`);
-				await refresh(applied ? "El veredicto se aplicó: revisá status.md." : "El veredicto no se pudo aplicar: el hallazgo sigue como candidato.");
-				return { ok: applied, text: detail };
-			};
-
-			if (input.verdict === null) {
-				return settle("unusable", "El verificador no devolvió un veredicto legible: el hallazgo sigue como candidato.", false);
-			}
-
-			if (input.verdict === "NO_REPRODUCIDO") {
-				await findings.update(finding.id, { state: "rejected" }, `verificador: ${input.reason || "no reproducido"}`);
-				return settle("rejected", `NO_REPRODUCIDO: el hallazgo pasó a rejected. Motivo: ${input.reason || "(sin motivo)"}`, true);
-			}
-
-			// Task 7: without the invocation token the parent cannot prove the executions are the ones its
-			// own child produced, so REPRODUCIDO is refused instead of trusted.
-			if (input.invocationToken === undefined || input.invocationToken.length === 0) {
-				return settle(
-					"unattested",
-					"No puedo demostrar que esta invocación del verificador sea la que lancé (falta el token de invocación): el hallazgo sigue como candidato.",
-					false,
-				);
-			}
-
-			// REPRODUCIDO only counts if the chain has the verifier's own execution against this endpoint.
+			// S76/task 2: a verdict counts only through the verifier's own signed executions with a
+			// complete HTTP response. Otherwise the effective verdict is INCONCLUSO and nothing moves.
 			const records = await evidence.read();
-			const executions = records.filter(
-				(record) => record.kind === "execution" && (record.payload as { sessionId?: string }).sessionId === input.verifierSessionId,
+			const inspection = inspectVerifierExecutions(records, {
+				verifierSessionId: input.verifierSessionId,
+				token: input.invocationToken,
+				endpoint: finding.endpoint,
+			});
+			const decision = decideVerdict({
+				verdict: input.verdict,
+				seqs: input.seqs,
+				reason: input.reason,
+				state: finding.state,
+				inspection,
+				tokenMissing: input.invocationToken === undefined || input.invocationToken.length === 0,
+			});
+
+			const at = new Date(now()).toISOString();
+			await evidence.append({
+				kind: "verification",
+				payload: {
+					event: decision.event,
+					finding: input.findingId,
+					verdict: input.verdict,
+					effective: decision.effective,
+					converted: decision.converted,
+					seqs: input.seqs,
+					verifierSessionId: input.verifierSessionId,
+					detail: decision.detail,
+					at,
+					sessionId,
+				},
+			});
+			if (decision.nextState !== null) {
+				await findings.update(finding.id, { state: decision.nextState }, `verificador: ${decision.effective}`);
+			}
+			await status.setLastVerification({ at, finding: input.findingId, event: decision.event, detail: decision.detail });
+			await status.note(`verificación ${input.findingId}: ${decision.effective}${decision.converted ? " (convertido)" : ""} — ${decision.detail}`);
+			await refresh(
+				decision.effective === "INCONCLUSO"
+					? "El veredicto fue INCONCLUSO: el hallazgo no cambió. Revisá el motivo en status.md."
+					: "El veredicto se aplicó: revisá status.md.",
 			);
-			const unsigned = executions.filter((record) => {
-				const payload = record.payload as { signature?: string; tool?: string; argv?: string[]; endpoint?: string; at?: string };
-				return (
-					(payload.endpoint === finding.endpoint || (payload.argv ?? []).join(" ").includes(finding.endpoint)) &&
-					!verifyExecutionSignature(input.invocationToken as string, {
-						sessionId: input.verifierSessionId,
-						tool: payload.tool ?? "",
-						argv: payload.argv ?? [],
-						endpoint: payload.endpoint ?? "",
-						at: payload.at ?? "",
-					}, payload.signature)
-				);
-			});
-			if (unsigned.length > 0) {
-				return settle(
-					"unattested",
-					`La ejecución seq ${unsigned.map((record) => record.seq).join(", ")} de la sesión del verificador no lleva una firma válida de esta invocación (${input.verifierSessionId.slice(0, 8)}…): el hallazgo sigue como candidato.`,
-					false,
-				);
-			}
-
-			const matching = executions.filter((record) => {
-				const payload = record.payload as { endpoint?: string; argv?: string[] };
-				const endpoint = payload.endpoint ?? "";
-				const argv = (payload.argv ?? []).join(" ");
-				return endpoint === finding.endpoint || argv.includes(finding.endpoint);
-			});
-			const claimed = input.seqs.length > 0 ? matching.filter((record) => input.seqs.includes(record.seq)) : matching;
-			if (claimed.length === 0) {
-				return settle(
-					"unsupported",
-					`El veredicto dice REPRODUCIDO pero la cadena no tiene ninguna ejecución de la sesión del verificador (${input.verifierSessionId.slice(0, 8)}…) contra ${finding.endpoint}. El hallazgo sigue como candidato.`,
-					false,
-				);
-			}
-
-			await findings.update(finding.id, { state: "verified" }, `verificador: reproducido en seq ${claimed.map((record) => record.seq).join(", ")}`);
-			return settle("verified", `REPRODUCIDO: verified con la evidencia seq ${claimed.map((record) => record.seq).join(", ")} de la sesión del verificador.`, true);
+			const prefix =
+				decision.converted && input.verdict !== null
+					? `Veredicto del verificador: ${input.verdict}. Veredicto efectivo: ${decision.effective} (convertido por el código).`
+					: `Veredicto efectivo: ${decision.effective}.`;
+			return {
+				ok: decision.effective !== "INCONCLUSO",
+				text: `${prefix} ${decision.detail}`,
+				effective: decision.effective,
+				converted: decision.converted,
+				state: decision.nextState ?? finding.state,
+			};
 		},
 
 		async stop(reason) {

@@ -146,6 +146,12 @@ export function renderStatus(input: {
 	lines.push("## Qué sigue");
 	lines.push("");
 	lines.push(state.nextStep || NEXT_PHASE[state.phase]);
+	const disputed = findings.filter((finding) => finding.state === "disputed");
+	if (disputed.length > 0) {
+		lines.push("", "## Disputas (las resolvés vos)");
+		lines.push("");
+		for (const finding of disputed) lines.push(`- ${finding.id} — ${finding.title}: el verificador no lo reprodujo sobre un hallazgo ya verificado. No se degrada solo.`);
+	}
 	const lastVerification = state.lastVerification ?? null;
 	if (lastVerification !== null) {
 		lines.push("", "## Verificación");

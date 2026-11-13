@@ -22,6 +22,10 @@ Estado a la fecha del checkpoint 14 (S75). Se actualiza con evidencia, no con "l
 | Verificador: tools = su allowlist, sin `bounty_finding` | `docs/evidence/subagent-bounty-verify-tools.md` |
 | `verified` solo por veredicto del verificador, con evidencia de su propia sesión | tests + flujo vivo |
 | Verificador firmado por invocación (HMAC), veredicto sin token rechazado | tests (`verifier-signature`) |
+| Semántica de veredictos: REPRODUCIDO y NO_REPRODUCIDO exigen una ejecución firmada con respuesta HTTP completa; sin eso el veredicto efectivo es INCONCLUSO y el hallazgo no se mueve | tests (`verdict-semantics`, `verify-inconclusive`) |
+| NO_REPRODUCIDO válido sobre `candidate` ⇒ `rejected`; sobre `verified` ⇒ `disputed`, que resuelve el operador | tests (`verdict-semantics`) |
+| El hijo del verificador conoce su programa (tarea + `GENTLE_BOUNTY_PROGRAM`) y no puede tocar otro: las tools rechazan otro nombre | tests (`program-lock`) |
+| `report_redact` cubre toda la prosa del reporte, no solo los extractos | tests (`report-quality`) |
 | `bounty_report` calcula el score y escribe el reporte validado | tests + flujo vivo |
 | Flujo completo en el lab: recon → finding → verificador real → verified → reporte | `docs/evidence/s43-live-run.md` |
 | Escenario (iii) en vivo: bloqueo, registro `gate`, sin `execution` — **S43 completo** | corrida del operador (R11) |
@@ -33,8 +37,12 @@ Estado a la fecha del checkpoint 14 (S75). Se actualiza con evidencia, no con "l
 
 | Qué | Riesgo si se saltea |
 |---|---|
-| **Corrida viva del flujo completo con la firma HMAC** (punto 2 de S75): recon → finding → verifier → verified → reporte con prosa del modelo | Es el único tramo nuevo sin corrida real; si falla, falla en el peor momento |
-| **Revisión del reporte generado** con la checklist nueva (resumen, condiciones, evidencia, redacción) | Un reporte que contradice su propio vector es un reporte que la plataforma rechaza |
+| ~~Corrida viva completa de punta a punta~~ | **Verificada en R14 (S76)**: recon → finding → verificador real (47s, REPRODUCIDO con seq 5 y 7 firmadas) → verified → reportero real (15s) → reporte escrito. Ver `docs/evidence/s76-live-run.md` |
+| **Revisión humana del reporte generado** (lo revisa el operador, no el agente) | Un reporte que contradice su propio vector, o que filtra un secreto, lo rechaza la plataforma |
+
+**El primer tráfico real sigue bloqueado** hasta que el operador revise el reporte generado
+(`work/lab-flow/reports/F-0001.md`, copiado a `docs/evidence/s76-live-run.md`). El flujo ya pasó de punta
+a punta con modelo real.
 
 ## Pendiente (no bloqueante, deuda declarada)
 

@@ -44,7 +44,7 @@ test("a signed execution from the verifier's own session verifies the finding", 
 			{
 				dns: async () => ({ cname: [] }),
 				readFile: (path) => readFile(path, "utf8"),
-				runTool: async () => ({ exitCode: 0, stdout: "HTTP 200\n{\"owner\":\"bob\"}", stderr: "" }),
+				runTool: async () => ({ exitCode: 0, stdout: "HTTP/1.1 200 OK\n{\"owner\":\"bob\"}", stderr: "" }),
 				confirm: async () => true,
 			},
 		);
@@ -85,7 +85,8 @@ test("an execution from the right session but without a valid signature is refus
 			invocationToken: "token-1",
 		});
 		assert.equal(applied.ok, false);
-		assert.match(applied.text, /no lleva una firma válida/);
+		assert.equal(applied.effective, "INCONCLUSO");
+		assert.match(applied.text, /sin ejecuciones firmadas/);
 	} finally {
 		await h.cleanup();
 	}
@@ -110,7 +111,8 @@ test("a signature from a different invocation token is refused", async () => {
 			invocationToken: "token-1",
 		});
 		assert.equal(applied.ok, false);
-		assert.match(applied.text, /no lleva una firma válida/);
+		assert.equal(applied.effective, "INCONCLUSO");
+		assert.match(applied.text, /sin ejecuciones firmadas/);
 	} finally {
 		await h.cleanup();
 	}
@@ -127,6 +129,7 @@ test("without the invocation token the verdict is refused, not trusted", async (
 			verifierSessionId: "child-1",
 		});
 		assert.equal(applied.ok, false);
+		assert.equal(applied.effective, "INCONCLUSO");
 		assert.match(applied.text, /falta el token de invocación/);
 	} finally {
 		await h.cleanup();

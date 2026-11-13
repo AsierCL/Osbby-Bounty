@@ -7,11 +7,14 @@ set -eu
 ROOT="${GENTLE_BOUNTY_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 BIN_DIR="${GENTLE_BOUNTY_S43_BIN:-/tmp/bounty-bin}"
 MARKER="${GENTLE_BOUNTY_S43_MARKER:-/tmp/hydra-ran.marker}"
-PROGRAM="lab-s43"
+# S76/task 6: cualquier programa se archiva; el marcador y el stub son del kit S43 y solo se tocan ahí.
+PROGRAM="${1:-lab-s43}"
 WORK="$ROOT/work/$PROGRAM"
 
-rm -f "$MARKER"
-rm -f "$BIN_DIR/hydra"
+if [ "$PROGRAM" = "lab-s43" ]; then
+	rm -f "$MARKER"
+	rm -f "$BIN_DIR/hydra"
+fi
 
 if [ -d "$WORK" ] && [ -n "$(ls -A "$WORK" 2>/dev/null)" ]; then
 	ARCHIVE="$ROOT/work/$PROGRAM-archivo-$(date +%Y%m%d-%H%M%S)"
@@ -22,7 +25,7 @@ else
 	echo "no había evidencia que archivar"
 fi
 
-if [ -f "$ROOT/.bounty/config.json" ]; then
+if [ "$PROGRAM" = "lab-s43" ] && [ -f "$ROOT/.bounty/config.json" ]; then
 	node -e '
 const fs = require("node:fs");
 const path = process.argv[1];
@@ -37,4 +40,8 @@ try {
 ' "$ROOT/.bounty/config.json" "$BIN_DIR"
 fi
 rmdir "$BIN_DIR" 2>/dev/null || true
-echo "kit S43 limpio (marcador y hydra borrados; la evidencia queda archivada)"
+if [ "$PROGRAM" = "lab-s43" ]; then
+	echo "kit S43 limpio (marcador y hydra borrados; la evidencia queda archivada)"
+else
+	echo "programa $PROGRAM archivado (no borré nada de la evidencia)"
+fi

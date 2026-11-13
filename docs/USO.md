@@ -40,6 +40,20 @@ bin/gentle-bounty --preflight acme
 La sesión arranca **sin el catálogo de skills** de tu Pi (`-ns`): las instrucciones de bounty son las
 del paquete, y nada más. También los subagentes.
 
+## Tres veredictos, y ninguno miente
+
+El verificador independiente no dice "lo vi" o "no lo vi" nada más:
+
+- **REPRODUCIDO** ⇒ el hallazgo pasa a `verified`.
+- **NO_REPRODUCIDO** ⇒ si estaba `candidate`, pasa a `rejected`; si estaba `verified`, pasa a
+  **`disputed`**, que resolvés vos. El código nunca degrada solo un hallazgo verificado.
+- **INCONCLUSO** ⇒ el hallazgo **no se mueve**. Es lo que corresponde cuando el verificador no pudo
+  ejecutar: sin alcance, conexión rechazada, timeout, el gate bloqueó, veredicto ilegible.
+
+Un veredicto cuenta solo si el verificador dejó al menos una ejecución **firmada** de su propia sesión
+y con **respuesta HTTP completa**. Por eso la tarea le pide usar `curl -i` o `-w '%{http_code}'`. Si el
+instrumento falla, el resultado es "no pude comprobarlo", nunca "no existe".
+
 ## Configuración del reporte
 
 En `.bounty/config.json`, solo lo edita el humano:

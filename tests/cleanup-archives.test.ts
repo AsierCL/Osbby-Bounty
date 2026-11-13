@@ -53,3 +53,24 @@ test("cleanup on an empty kit says so instead of inventing an archive", async ()
 		await rm(root, { recursive: true, force: true });
 	}
 });
+
+test("cleanup archives any program by name and leaves the S43 kit alone", async () => {
+	const root = await mkdtemp(join(tmpdir(), "bounty-cleanup-program-"));
+	try {
+		const marker = join(root, "marker");
+		await mkdir(join(root, "work", "lab-flow", "evidence"), { recursive: true });
+		await writeFile(join(root, "work", "lab-flow", "evidence", "log.jsonl"), "{}\n", "utf8");
+		await writeFile(marker, "still here\n", "utf8");
+		const out = execFileSync("sh", [join(REPO, "scripts", "s43-cleanup.sh"), "lab-flow"], {
+			encoding: "utf8",
+			env: { ...process.env, GENTLE_BOUNTY_ROOT: root, GENTLE_BOUNTY_S43_MARKER: marker, GENTLE_BOUNTY_S43_BIN: join(root, "bin") },
+		});
+		assert.match(out, /programa lab-flow archivado/);
+		const archived = (await readdir(join(root, "work"))).filter((entry) => /^lab-flow-archivo-\d{8}-\d{6}$/.test(entry));
+		assert.equal(archived.length, 1);
+		assert.equal(await exists(join(root, "work", archived[0] as string, "evidence", "log.jsonl")), true);
+		assert.equal(await exists(marker), true, "the kit marker is not this program's business");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});

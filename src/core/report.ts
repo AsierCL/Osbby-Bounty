@@ -276,7 +276,7 @@ function headersOf(argv: string[]): string[] {
 	return out;
 }
 
-function statusAndBody(stdout: string): { status: string | null; body: string } {
+export function statusAndBody(stdout: string): { status: string | null; body: string } {
 	const trimmed = stdout.trim();
 	const http = /^HTTP\/[\d.]+\s+(\d{3})/.exec(trimmed);
 	if (http) return { status: http[1] as string, body: trimmed.split(/\r?\n/).slice(1).join("\n") };
@@ -354,29 +354,31 @@ export function renderReport(input: ReportInput): string {
 	const vector = finding.cvss ?? "";
 	const conditions = deriveConditions(vector, lang);
 	const evidence = extractEvidence(input.records, { reproSeqs: input.reproSeqs, initialSeq: input.initialSeq, redact: input.redact, lang });
+	// S76/task 5: redaction covers every text of the report, the reporter's prose included.
+	const mask = (value: string): string => redactExtract(value, input.redact);
 	const lines: string[] = [];
-	lines.push(`# ${finding.title}`, "");
+	lines.push(`# ${mask(finding.title)}`, "");
 	lines.push(`**${labels.severity}:** ${severity}`);
 	lines.push(`**${labels.class}:** ${finding.class}${input.cwe === null ? "" : ` (CWE: ${input.cwe})`}`);
 	lines.push(`**${labels.endpoint}:** ${finding.endpoint}${finding.parameter === null ? "" : ` (${finding.parameter})`}`);
 	lines.push(`**${labels.program}:** ${input.program}`);
 	if (scoreMismatch !== null) lines.push(`**${labels.warning}:** ${scoreMismatch}`);
-	for (const warning of input.warnings ?? []) lines.push(`**${labels.warning}:** ${warning}`);
+	for (const warning of input.warnings ?? []) lines.push(`**${labels.warning}:** ${mask(warning)}`);
 	if (input.steps.length > 0 && input.reproSeqs.length > 0 && input.steps.length !== input.reproSeqs.length) {
 		lines.push(
 			`**${labels.warning}:** ${lang === "es" ? `${input.steps.length} pasos para ${input.reproSeqs.length} reproducciones: el esperado de cada reproducción puede no corresponder` : `${input.steps.length} steps for ${input.reproSeqs.length} reproductions: the expected outcome of each reproduction may be off`}`,
 		);
 	}
-	lines.push(`**State:** ${finding.state}`, "");
+	lines.push(`**${labels.state}:** ${finding.state}`, "");
 
-	lines.push(`## ${labels.summary}`, "", input.summary, "");
+	lines.push(`## ${labels.summary}`, "", mask(input.summary), "");
 	lines.push(`## ${labels.conditions}`, "");
-	for (const condition of conditions) lines.push(`- ${condition.text}`);
-	if (input.sensitiveData !== null) lines.push(`- **${labels.sensitive}:** ${input.sensitiveData}`);
+	for (const condition of conditions) lines.push(`- ${mask(condition.text)}`);
+	if (input.sensitiveData !== null) lines.push(`- **${labels.sensitive}:** ${mask(input.sensitiveData)}`);
 	lines.push("");
 
 	lines.push(`## ${labels.steps}`, "");
-	input.steps.forEach((step, index) => lines.push(`${index + 1}. ${step}`));
+	input.steps.forEach((step, index) => lines.push(`${index + 1}. ${mask(step)}`));
 	if (input.steps.length === 0) lines.push(`_${LABELS[lang].none}_`);
 	lines.push("");
 
@@ -393,7 +395,7 @@ export function renderReport(input: ReportInput): string {
 			lines.push(`**seq ${item.seq}** — ${item.signed ? labels.signed : labels.unsigned}`, "");
 			lines.push(...evidenceLines(item, labels));
 			if (input.steps.length > 0) {
-				lines.push(`- ${labels.expected}: ${input.steps[index] ?? "—"}`);
+				lines.push(`- ${labels.expected}: ${mask(input.steps[index] ?? "—")}`);
 			}
 			lines.push("");
 		}
@@ -404,8 +406,8 @@ export function renderReport(input: ReportInput): string {
 		lines.push("");
 	}
 
-	lines.push(`## ${labels.impact}`, "", input.impact, "");
-	lines.push(`## ${labels.remediation}`, "", input.remediation, "");
+	lines.push(`## ${labels.impact}`, "", mask(input.impact), "");
+	lines.push(`## ${labels.remediation}`, "", mask(input.remediation), "");
 	return lines.join("\n");
 }
 

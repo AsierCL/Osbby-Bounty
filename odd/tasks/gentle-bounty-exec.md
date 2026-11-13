@@ -1853,3 +1853,33 @@ ninguna ejecución.
 - A. `buildVerifierTask` no dice el programa ni la ruta del alcance ⇒ el hijo adivina.
 - B. `NO_REPRODUCIDO` sin ninguna ejecución firmada del hijo no es evidencia de nada: debería quedar
   como "no utilizable" y no tocar el estado del hallazgo.
+
+### L29 — S76: veredictos con atribución, guardarraíl de programa, y la corrida viva verde
+
+Decisiones del operador: A aprobada; B aprobada y ampliada a tres veredictos.
+
+1. **A**: `buildVerifierTask` nombra el programa y la ruta absoluta del alcance, y prohíbe buscar otros
+   scopes o listar `work/`. El runner pasa `GENTLE_BOUNTY_PROGRAM` al hijo; la extensión lo usa como
+   valor por defecto y **rechaza otro nombre** en `bounty_scope`, `bounty_run`, `bounty_evidence`,
+   `bounty_status` y `stop`. Tests: `program-lock` (carga sin diálogo con el mismo hash, rechazo, y
+   default).
+2. **B**: `src/core/verdict.ts` decide. REPRODUCIDO y NO_REPRODUCIDO exigen ≥1 ejecución firmada de la
+   sesión del verificador **con respuesta HTTP completa** (exit 0 y estado); si no, el efectivo es
+   INCONCLUSO y el hallazgo no se mueve. NO_REPRODUCIDO válido: `candidate → rejected`,
+   `verified → disputed` (estado nuevo, lo resuelve el operador). `bounty_verify` informa veredicto
+   declarado, efectivo, si hubo conversión, y el estado. Tests: `verdict-semantics` (5) y
+   `verify-inconclusive` (el fallo de R13, con `pi` falso).
+3. `protocol.md` y el asset del verificador: un instrumento que falla no es evidencia de ausencia.
+4. `report_redact` cubre toda la prosa del reporte (test con secreto en el resumen, los pasos y el
+   impacto).
+5. `work/lab-flow` archivado con el cleanup nuevo (que ahora acepta un programa y no borra).
+6. **Corrida viva (R14)**: verificador real 47 s, REPRODUCIDO seq 5 y 7 con firma válida, 200 OK dos
+   veces; `status.md` con el evento; reportero real 15 s; reporte escrito. Dos defectos encontrados y
+   corregidos en el camino: el extractor de JSON del script tomaba el primer `{` (ahora objetos
+   balanceados, `scripts/lib/prose.ts`) y la etiqueta `State:` no estaba localizada en el reporte.
+   Observación abierta: el hijo del verificador duplicó `curl` dentro de `args` (argv registrado
+   `curl curl -sS -i …`); la evidencia es real, pero el argv queda con el nombre repetido.
+7. `GO-NO-GO`: semántica de veredictos, `disputed` y el bloqueo del primer tráfico hasta la revisión
+   humana del reporte.
+
+Estado: **325 tests, 0 fallos**.

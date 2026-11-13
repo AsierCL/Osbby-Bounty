@@ -20,7 +20,7 @@ export async function verifyFinding(input: {
 	const deps = {
 		dns: async () => ({ cname: [] }),
 		readFile: (path: string) => readFile(path, "utf8"),
-		runTool: async () => ({ exitCode: 0, stdout: "HTTP 200\n{\"owner\":\"bob\"}", stderr: "" }),
+		runTool: async () => ({ exitCode: 0, stdout: "HTTP/1.1 200 OK\n{\"owner\":\"bob\"}", stderr: "" }),
 		confirm: async () => true,
 	};
 	const verifier = createSession(

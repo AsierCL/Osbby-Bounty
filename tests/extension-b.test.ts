@@ -99,7 +99,8 @@ test("D3: bounty_verify launches the verifier and applies an unsupported verdict
 	assert.ok(verify, "bounty_verify is not registered");
 	const result = await verify.execute("4", { program: "lab", finding_id: "F-0001" });
 	assert.equal(result.details.ok, false, result.content[0]?.text);
-	assert.match(result.content[0]?.text ?? "", /no tiene ninguna ejecución de la sesión del verificador/);
+	assert.match(result.content[0]?.text ?? "", /Veredicto efectivo: INCONCLUSO/);
+	assert.match(result.content[0]?.text ?? "", /sin ejecuciones firmadas/);
 	const finding = JSON.parse(await readFile(join(ROOT, "work", "lab", "findings", "F-0001.json"), "utf8"));
 	assert.equal(finding.state, "candidate", "an unsupported verdict must not verify the finding");
 	// The verifier's answer was parsed (D2) and the finding is untouched.

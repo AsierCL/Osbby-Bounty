@@ -32,13 +32,13 @@ async function buildChain(dir: string, options: { signature?: string } = {}) {
 	return store;
 }
 
-async function setup(lang: "en" | "es" = "es") {
+async function setup(lang: "en" | "es" = "es", redact = true) {
 	const dir = await mkdtemp(join(tmpdir(), "bounty-report-"));
 	await mkdir(join(dir, "work", "lab"), { recursive: true });
 	const scopePath = join(dir, "scope.yaml");
 	await writeFile(scopePath, "program: lab\nlab: true\nauthorized_on: 2026-01-01\nin_scope:\n  - 127.0.0.1:3000\nlimits:\n  rate_rps: 5\n", "utf8");
 	const session = createSession(
-		{ root: dir, program: "lab", reportLang: lang, reportRedact: true },
+		{ root: dir, program: "lab", reportLang: lang, reportRedact: redact },
 		{ dns: async () => ({ cname: [] }), readFile: (path) => readFile(path, "utf8"), runTool: async () => ({ exitCode: 0, stdout: "", stderr: "" }), confirm: async () => true },
 	);
 	await session.scope({ file: scopePath });
@@ -177,4 +177,50 @@ test("the evidence extractor pairs executions with their results and truncates l
 	assert.equal(extracted.reproduction[0]?.status, "200");
 	assert.match(extracted.reproduction[0]?.body ?? "", /recortado/);
 	assert.equal(extracted.reproduction[0]?.signed, false);
+});
+
+
+test("(S76/5) redaction covers the reporter's prose, not just the extracts", async () => {
+	const prose = "La sesión viaja en Cookie: session=abc123 y el token es Bearer eyJhbGciOiJIUzI1NiJ9.x.y; la tarjeta 4111 1111 1111 1111 y el email victim@example.com aparecen en la respuesta.";
+	const h = await setup("es", true);
+	try {
+		await buildChain(h.dir);
+		const written = await h.session.report({
+			findingId: h.findingId,
+			metrics: METRICS,
+			summary: `${prose} El verificador lo reprodujo dos veces.`,
+			steps: [`GET /api/invoices/2 con ${prose}`],
+			impact: prose,
+			remediation: prose,
+		});
+		assert.equal(written.ok, true, written.text);
+		const markdown = await readFile(join(h.dir, "work", "lab", "reports", `${h.findingId}.md`), "utf8");
+		for (const secret of ["abc123", "eyJhbGciOiJIUzI1NiJ9", "4111 1111 1111 1111", "victim@example.com"]) {
+			assert.ok(!markdown.includes(secret), `the report still contains ${secret}`);
+		}
+		assert.match(markdown, /\[redactado\]/);
+	} finally {
+		await h.cleanup();
+	}
+});
+
+test("(S76/5) with report_redact off the prose is kept as written", async () => {
+	const secret = "Cookie: session=abc123";
+	const h = await setup("es", false);
+	try {
+		await buildChain(h.dir);
+		const written = await h.session.report({
+			findingId: h.findingId,
+			metrics: METRICS,
+			summary: `La sesión viaja en ${secret}. El verificador lo reprodujo dos veces.`,
+			steps: ["GET /api/invoices/2"],
+			impact: "Lectura de facturas ajenas.",
+			remediation: "Validar propiedad.",
+		});
+		assert.equal(written.ok, true, written.text);
+		const markdown = await readFile(join(h.dir, "work", "lab", "reports", `${h.findingId}.md`), "utf8");
+		assert.match(markdown, /session=abc123/);
+	} finally {
+		await h.cleanup();
+	}
 });
