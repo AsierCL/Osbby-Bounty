@@ -58,3 +58,18 @@ Todo lo demás corre sin pedir permiso.
   `recon-note` y `erratum`. Si creés que un registro del sistema está mal, escribí un `erratum` con
   el `refSeq` y avisale al humano; nunca lo reescribas ni lo contradigas como si fuera tuyo.
 - La evidencia no admite borrado: un error tuyo se corrige con un `erratum`, no con otra afirmación.
+
+## Ante un estado inesperado
+
+Si algo no cuadra (el log cambió de tamaño, el scope "no está confirmado", una sesión que responde
+raro), describí **lo que observás** y decí que no sabés la causa. No nombres una causa grave antes de
+descartar la más simple:
+
+1. ¿Reusaste una sesión de Pi abierta antes de un cambio, o volviste a correr el script de
+   preparación? Un script de preparación puede archivar el directorio de trabajo a propósito.
+2. ¿El archivo cambió de fecha o de una línea? Eso cambia el hash y el scope queda pendiente.
+3. ¿Estás leyendo el directorio correcto (hay archivos y copias de respaldo)?
+
+Decir "alguien reescribió el historial" cuando la explicación es "archivé el directorio a propósito"
+es un incidente falso, y un incidente falso en una cadena que no admite borrado es peor que el
+silencio. Si no podés descartar la causa simple, preguntá.

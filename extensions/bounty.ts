@@ -137,6 +137,7 @@ export default function bountyExtension(pi: PiLike): void {
 				root,
 				program,
 				...(process.env.GENTLE_BOUNTY_SESSION_ID === undefined ? {} : { sessionId: process.env.GENTLE_BOUNTY_SESSION_ID }),
+				...(process.env.GENTLE_BOUNTY_INVOCATION_TOKEN === undefined ? {} : { invocationToken: process.env.GENTLE_BOUNTY_INVOCATION_TOKEN }),
 				redaction: config?.redaction ?? redactionMode(),
 				budget: config?.budget,
 			},
@@ -386,6 +387,7 @@ export default function bountyExtension(pi: PiLike): void {
 				seqs: verdict?.seqs ?? [],
 				reason: verdict?.reason ?? "",
 				verifierSessionId: result.sessionId,
+				invocationToken: result.invocationToken,
 			});
 			return text(
 				`${applied.text}\n\nVerificador: exit=${String(result.exitCode)} · ${Math.round(result.durationMs / 1000)}s · tools: ${result.activeTools.join(", ") || "(ninguna)"}`,

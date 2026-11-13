@@ -103,7 +103,7 @@ test("7a + B3: granted, denied and unavailable are recorded and reported distinc
 test("7b: the model cannot append system kinds", async () => {
 	const h = await harness();
 	try {
-		for (const kind of ["execution", "gate", "confirmation", "verification"]) {
+		for (const kind of ["execution", "gate", "gate-block", "incident", "confirmation", "verification"]) {
 			const result = await h.session.evidence({ action: "append", kind, payload: { note: "intento" } });
 			assert.equal(result.ok, false, kind);
 			assert.match(result.text, /reservado al sistema/);

@@ -24,6 +24,7 @@ import { parseScope, evaluate, type ScopePolicy } from "../core/scope.ts";
 import { scoreVector } from "../core/cvss.ts";
 import { renderReport, validateReport } from "../core/report.ts";
 import { randomUUID } from "node:crypto";
+import { signExecution, verifyExecutionSignature } from "../core/attestation.ts";
 import { createStatusStore, renderStatus, writeStatusFile, type BountyPhase, type ProgramState, type StatusStore } from "../core/status.ts";
 
 export interface ProgramConfig {
@@ -34,6 +35,8 @@ export interface ProgramConfig {
 	budget?: BudgetPolicy;
 	/** D1: identity of this session, used in chain records. Set by the runner for children. */
 	sessionId?: string;
+	/** Task 7: the runner's per-invocation token. When set, execution records are signed. */
+	invocationToken?: string;
 	now?: () => number;
 }
 
@@ -71,6 +74,8 @@ export interface ProgramSession {
 		seqs: number[];
 		reason: string;
 		verifierSessionId: string;
+		/** Task 7: the runner's token for this invocation; without it the verdict is refused. */
+		invocationToken?: string;
 	}): Promise<ToolResult>;
 	/** Emergency stop: kills the children of bounty_run and records it. */
 	stop(reason: string): Promise<ToolResult>;
@@ -143,6 +148,7 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 	const evidence: EvidenceStore = createEvidenceStore(evidenceDir, { now });
 	const redaction: RedactionMode = config.redaction ?? "off";
 	const sessionId = config.sessionId ?? randomUUID();
+	const invocationToken = config.invocationToken ?? null;
 
 	let policy: ScopePolicy | null = null;
 	let scopePath: string | null = null;
@@ -191,11 +197,42 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				return settle("rejected", `NO_REPRODUCIDO: el hallazgo pasó a rejected. Motivo: ${input.reason || "(sin motivo)"}`, true);
 			}
 
+			// Task 7: without the invocation token the parent cannot prove the executions are the ones its
+			// own child produced, so REPRODUCIDO is refused instead of trusted.
+			if (input.invocationToken === undefined || input.invocationToken.length === 0) {
+				return settle(
+					"unattested",
+					"No puedo demostrar que esta invocación del verificador sea la que lancé (falta el token de invocación): el hallazgo sigue como candidato.",
+					false,
+				);
+			}
+
 			// REPRODUCIDO only counts if the chain has the verifier's own execution against this endpoint.
 			const records = await evidence.read();
 			const executions = records.filter(
 				(record) => record.kind === "execution" && (record.payload as { sessionId?: string }).sessionId === input.verifierSessionId,
 			);
+			const unsigned = executions.filter((record) => {
+				const payload = record.payload as { signature?: string; tool?: string; argv?: string[]; endpoint?: string; at?: string };
+				return (
+					(payload.endpoint === finding.endpoint || (payload.argv ?? []).join(" ").includes(finding.endpoint)) &&
+					!verifyExecutionSignature(input.invocationToken as string, {
+						sessionId: input.verifierSessionId,
+						tool: payload.tool ?? "",
+						argv: payload.argv ?? [],
+						endpoint: payload.endpoint ?? "",
+						at: payload.at ?? "",
+					}, payload.signature)
+				);
+			});
+			if (unsigned.length > 0) {
+				return settle(
+					"unattested",
+					`La ejecución seq ${unsigned.map((record) => record.seq).join(", ")} de la sesión del verificador no lleva una firma válida de esta invocación (${input.verifierSessionId.slice(0, 8)}…): el hallazgo sigue como candidato.`,
+					false,
+				);
+			}
+
 			const matching = executions.filter((record) => {
 				const payload = record.payload as { endpoint?: string; argv?: string[] };
 				const endpoint = payload.endpoint ?? "";
@@ -312,6 +349,7 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				};
 			}
 
+			await status.retireScopeNotes();
 			await status.confirmScope(hash);
 			await refresh("Con el alcance confirmado, arranco el reconocimiento.");
 			return { ok: true, text: `${summary}\n\nAlcance confirmado por un humano (hash ${hash.slice(0, 12)}…). Arranco.` };
@@ -348,6 +386,17 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				}
 				const state = await status.read();
 				if (onDisk === null || state.scopeConfirmedHash !== sha256(onDisk)) {
+					// Task 5: "never confirmed" and "confirmed then edited" are different situations and
+					// deserve different words; both block, but for different reasons.
+					const neverConfirmed = state.scopeConfirmedHash === null || state.scopeConfirmedHash === undefined;
+					if (neverConfirmed) {
+						await status.note("bloqueado: el alcance nunca fue confirmado en esta máquina");
+						await refresh("Cargá el alcance con bounty_scope y confirmalo.");
+						return {
+							ok: false,
+							text: "El alcance nunca fue confirmado para este archivo: no ejecuto nada. Cargalo con bounty_scope y confirmalo.",
+						};
+					}
 					await status.note("bloqueado: el scope cambió desde la última confirmación");
 					await refresh("Volvé a cargar y confirmar el alcance antes de seguir.");
 					return {
@@ -502,9 +551,21 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				return { ok: false, text: `Presupuesto agotado: ${budgetHit.message}. No se ejecutó nada.` };
 			}
 
+			const executionAt = new Date(now()).toISOString();
+			const endpoint = new URL(input.target).pathname;
 			await evidence.append({
 				kind: "execution",
-				payload: { tool: input.tool, argv, contacts: decision.contacts, technique: input.technique ?? null, endpoint: new URL(input.target).pathname, at: new Date(now()).toISOString(), sessionId },
+				payload: {
+					tool: input.tool,
+					argv,
+					contacts: decision.contacts,
+					technique: input.technique ?? null,
+					endpoint,
+					at: executionAt,
+					sessionId,
+					// Task 7: signed with the token the runner gave this session, if any.
+					...(invocationToken === null ? {} : { signature: signExecution(invocationToken, { sessionId, tool: input.tool, argv, endpoint, at: executionAt }) }),
+				},
 			});
 
 			let execution: ToolExecution;

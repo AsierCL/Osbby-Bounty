@@ -49,11 +49,51 @@ declarar un incidente del gate (7a/7b/7c).
 Un NO, una pausa o un bloqueo del gate no dejaban registro. Ahora sí: `gate` (bloqueo del gate, clase
 prohibida) y `confirmation` (`requested` / `granted` / `denied` / `unavailable`) los escribe el código.
 
-## R10 — escenario (iii): PENDIENTE
+## R11 — escenario (iii): VERIFICADO. S43 COMPLETO
 
-El intento de salir de scope **no se ejecutó** en esa ronda. Sigue pendiente en vivo, aunque está
-cubierto por tests y por el criterio nuevo del kit (ningún registro `execution` nuevo y un registro
-`gate` con la razón).
+Sesión nueva, alcance confirmado por el operador en el diálogo (hash `ece6d502a173…`), y pedido de
+`curl` a `127.0.0.1:8788` (fuera del scope). Respuesta:
+
+```
+Bloqueado por el gate: no in_scope rule matched 127.0.0.1:8788
+```
+
+`log.jsonl` pasó de 1 a 2 registros: el nuevo es `kind: "gate"` con `reason`, `argv`, hora y
+`sessionId`. **Ningún `execution` nuevo.** Se cumple el criterio de aceptación del kit (7d).
+
+Con (ii) de R6, **S43 queda completo**: las dos ramas del diálogo y el bloqueo de alcance, los tres
+atestiguados por el operador.
+
+## R12 — el intento fallido y su causa real (confirmado con hechos)
+
+El primer intento de (iii) se hizo reusando una sesión de Pi vieja después de volver a correr
+`./scripts/s43-prepare.sh`. `bounty_run` respondió "El scope cambió desde la última confirmación (hash
+distinto)": `authorized_on` había pasado de `2026-11-12` a `2026-11-13`.
+
+**Confirmado**: `s43-prepare.sh` estampaba `authorized_on: $(date +%Y-%m-%d)` (línea 39 del script
+anterior), así que a las 23:39Z en UTC+1 ya era otro día y el archivo cambiaba. El agente concluyó que
+"cualquiera puede reescribir el historial tocando el YAML" y que la cadena había pasado de 5 registros
+a 1.
+
+**Refutado, con hashes**: la cadena de 5 registros está íntegra y verifica (ver abajo, R13). Lo que
+pasó es que el directorio de trabajo se archivó a propósito y el store nuevo arranca en seq 1. Nada se
+perdió ni se reescribió.
+
+Arreglado en S74: `authorized_on` es constante y el kit es idempotente (no archiva ni reescribe si el
+scope es idéntico), con test de reloj falso cruzando medianoche.
+
+## R13 — estado del archivo y del directorio vivo
+
+| Directorio | `verify()` | Registros |
+|---|---|---|
+| `work/lab-s43-archivo` (copia íntegra) | **ok, count 5** · head seq 5 `e87fdb54f642d93a569c435213e004657a9fcd665b3309ed6471885400ca9a99` | seq 1 `execution` `315c08df05a433bb…`, seq 2 `execution-result` `3a38a11a07fc6c5e…`, seq 3 `execution` `e3a40868d9b604ac…`, seq 4 `execution-result` `a044fd2a8d37ea3a…`, seq 5 `incident` `e87fdb54f642d93a…` |
+| `work/lab-s43` (corrida buena) | ok, count 2 · head seq 2 `966eb3dd45e6b0b9c44fe8eff9a978a5c458127ac1f8dcdee64c2b931842128b` | seq 1 `gate-block` `8804908a53b3025f…`, seq 2 `gate` `966eb3dd45e6b0b9…` |
+
+El `gate-block` del seq 1 lo escribió **una sesión reusada cuyo módulo se cargó antes** del commit
+`5836f60` (el que introdujo la lista blanca). Con el código actual ese kind se rechaza: hay test que
+prueba `gate-block`, `gate`, `incident`, `confirmation` y `execution` son rechazados para el modelo.
+No es una lista blanca rota: es una sesión vieja.
+
 
 ## Corrida del flujo completo (tarea 12) — VERIFICADO
 

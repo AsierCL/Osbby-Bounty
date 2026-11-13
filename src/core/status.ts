@@ -37,6 +37,8 @@ export interface ProgramState {
 	pending: PendingConfirmation | null;
 	/** B2: the last destructive confirmation, as a dated event instead of a stuck pending item. */
 	lastConfirmation: ConfirmationEvent | null;
+	/** Task 3: retired "the scope changed" notes, kept as dated history instead of live noise. */
+	scopeEvents: { at: string; text: string }[];
 	nextStep: string;
 	notes: string[];
 	updatedAt: string;
@@ -70,8 +72,14 @@ const NEXT_PHASE: Record<BountyPhase, string> = {
 	close: "Decime si abrimos otro programa.",
 };
 
-export function renderStatus(input: { state: ProgramState; findings: Finding[]; scopePath: string | null }): string {
+export function renderStatus(input: {
+	state: ProgramState;
+	findings: Finding[];
+	scopePath: string | null;
+	scopeAuthorizedOn?: string | null;
+}): string {
 	const { state, findings, scopePath } = input;
+	const scopeAuthorizedOn = input.scopeAuthorizedOn ?? null;
 	const lines: string[] = [];
 
 	lines.push(`# ${state.program} — estado`, "");
@@ -80,11 +88,12 @@ export function renderStatus(input: { state: ProgramState; findings: Finding[]; 
 	if (scopePath) {
 		const confirmed = state.scopeConfirmedHash !== null && state.scopeHash !== null && state.scopeConfirmedHash === state.scopeHash;
 		const suffix = confirmed
-			? ` (confirmado el ${(state.scopeConfirmedAt ?? "").slice(0, 10)}, hash ${(state.scopeHash ?? "").slice(0, 12)}…)`
+			? ` (confirmado el ${(state.scopeConfirmedAt ?? "").replace(".000Z", "Z")} — UTC; hash ${(state.scopeHash ?? "").slice(0, 12)}…)`
 			: state.scopeConfirmedHash === null
 				? " (todavía sin confirmar)"
 				: " (cambió desde la última confirmación: hay que volver a confirmarlo)";
 		lines.push(`**Alcance:** \`${scopePath}\`${suffix}`);
+	if (scopeAuthorizedOn !== null) lines.push(`**Fecha declarada en el scope:** ${scopeAuthorizedOn} (la escribe el operador, no el reloj de la sesión)`);
 	}
 	lines.push("");
 
@@ -135,6 +144,12 @@ export function renderStatus(input: { state: ProgramState; findings: Finding[]; 
 	lines.push("## Qué sigue");
 	lines.push("");
 	lines.push(state.nextStep || NEXT_PHASE[state.phase]);
+	const scopeEvents = state.scopeEvents ?? [];
+	if (scopeEvents.length > 0) {
+		lines.push("", "## Historial del alcance");
+		lines.push("");
+		for (const event of scopeEvents.slice(-5)) lines.push(`- ${event.at.slice(0, 16).replace("T", " ")} — ${event.text}`);
+	}
 	if (state.notes.length > 0) {
 		lines.push("", "## Notas");
 		lines.push("");
@@ -152,6 +167,7 @@ export interface StatusStore {
 	confirmScope(hash?: string): Promise<ProgramState>;
 	setScopeHash(hash: string | null): Promise<ProgramState>;
 	setLastConfirmation(event: ConfirmationEvent | null): Promise<ProgramState>;
+	retireScopeNotes(): Promise<ProgramState>;
 	note(text: string): Promise<ProgramState>;
 	file(): string;
 }
@@ -176,6 +192,7 @@ export function createStatusStore(options: { workDir: string; program: string; n
 			scopeHash: null,
 			pending: null,
 			lastConfirmation: null,
+			scopeEvents: [],
 			nextStep: "",
 			notes: [],
 			updatedAt: new Date(now()).toISOString(),
@@ -232,6 +249,18 @@ export function createStatusStore(options: { workDir: string; program: string; n
 				state.scopeHash = hash;
 			}
 			if (state.pending?.kind === "scope") state.pending = null;
+			await this.write(state);
+			return state;
+		},
+
+		/** Task 3: a new confirmed hash retires the stale "scope changed" notes into dated history. */
+		async retireScopeNotes() {
+			const state = await this.read();
+			const stale = state.notes.filter((note) => /el scope cambió/i.test(note));
+			if (stale.length === 0) return state;
+			state.notes = state.notes.filter((note) => !/el scope cambió/i.test(note));
+			const at = new Date(now()).toISOString();
+			state.scopeEvents = [...(state.scopeEvents ?? []), ...stale.map((text) => ({ at, text }))];
 			await this.write(state);
 			return state;
 		},

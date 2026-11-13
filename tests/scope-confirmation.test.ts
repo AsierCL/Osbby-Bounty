@@ -99,7 +99,7 @@ test("S63: a human 'yes' confirms, records the hash and lets the gate work", asy
 		assert.equal(result.ok, true, result.text);
 		assert.match(result.text, /Alcance confirmado por un humano \(hash [0-9a-f]{12}/);
 		const status = await readFile(h.session.paths.statusFile, "utf8");
-		assert.match(status, /confirmado el \d{4}-\d{2}-\d{2}, hash [0-9a-f]{12}/);
+		assert.match(status, /confirmado el \d{4}-\d{2}-\d{2}T[\d:.]+Z — UTC; hash [0-9a-f]{12}/);
 		const run = await h.session.run({ tool: "curl", args: ["-sS", `http://127.0.0.1:${PORT}/`], target: `http://127.0.0.1:${PORT}/` });
 		assert.equal(run.ok, true, run.text);
 	} finally {

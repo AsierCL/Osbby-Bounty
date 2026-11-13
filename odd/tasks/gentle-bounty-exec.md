@@ -1782,3 +1782,32 @@ Todas las tareas de la Parte B, en el orden pedido:
 13. Informe: este bloque + `docs/GO-NO-GO.md`.
 
 Estado: **293 tests, 0 fallos**.
+
+### L26 — S74: R11-R13, hechos verificados y siete correcciones
+
+**R11** — S43 (iii) verificado por el operador y registrado: bloqueo con mensaje legible, un registro
+`gate`, ningún `execution`. **S43 completo.**
+
+**R12/R13, respondidos con hechos** (detalle en `docs/evidence/s43-live-run.md`):
+`work/lab-s43-archivo` verifica **ok, 5 registros**, head `e87fdb54…`, con los mismos hashes que el
+operador vio, `incident` seq 5 incluido. `work/lab-s43` tiene 2 registros: `gate-block` (sesión vieja,
+previa a la lista blanca) y `gate` (la corrida buena). `authorized_on` se estampaba con
+`$(date +%Y-%m-%d)`: confirmado. **Nada se perdió ni se reescribió**; el "5 → 1" es un store nuevo.
+
+Tareas cerradas:
+
+1. R12 confirmado/refutado con paths y hashes (arriba).
+2. `authorized_on` constante (`2026-01-01`) + kit idempotente; test con `date` falso a ambos lados de
+   medianoche → mismo hash, sin archivo.
+3. `retireScopeNotes()`: al confirmar un hash nuevo, las notas "el scope cambió" pasan a
+   `scopeEvents` fechados.
+4. Un solo reloj: `confirmado el …Z — UTC` + fecha declarada en el scope.
+5. `bounty_run` distingue "nunca confirmado" de "cambió en disco".
+6. Lista blanca probada con `gate-block`, `gate`, `incident`, `confirmation`, `execution`: todas
+   rechazadas. El seq 1 es de una sesión previa a `5836f60`, no de una lista blanca rota.
+7. Firma HMAC por invocación: el runner genera el token, la sesión del hijo firma cada `execution`, y
+   el padre rechaza un REPRODUCIDO sin firma válida, con token ajeno o sin token. 4 tests.
+8. `protocol.md`: ante un estado inesperado, describir y no nombrar causas graves sin descartar la
+   explicación simple (sesión reusada, script re-ejecutado, directorio archivado).
+
+Estado: **298 tests, 0 fallos**.

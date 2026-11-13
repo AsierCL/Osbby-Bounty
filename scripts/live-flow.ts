@@ -84,6 +84,7 @@ const applied = await session.applyVerifierVerdict({
 	seqs: verdict?.seqs ?? [],
 	reason: verdict?.reason ?? "",
 	verifierSessionId: result.sessionId,
+	invocationToken: result.invocationToken,
 });
 console.log(`5. aplicación: ${applied.ok ? "OK" : "NO"} — ${applied.text.split("\n")[0].slice(0, 140)}`);
 

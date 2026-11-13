@@ -23,7 +23,10 @@ export async function verifyFinding(input: {
 		runTool: async () => ({ exitCode: 0, stdout: "HTTP 200\n{\"owner\":\"bob\"}", stderr: "" }),
 		confirm: async () => true,
 	};
-	const verifier = createSession({ root: input.root, program: input.program, sessionId: "verifier-session" }, deps);
+	const verifier = createSession(
+		{ root: input.root, program: input.program, sessionId: "verifier-session", invocationToken: "verifier-token" },
+		deps,
+	);
 	await verifier.scope({ file: input.scopePath, confirm: async () => true });
 	await verifier.run({ tool: "curl", args: ["-sS", input.target], target: input.target });
 
@@ -37,6 +40,7 @@ export async function verifyFinding(input: {
 		seqs: [seq],
 		reason: "reproducido dos veces",
 		verifierSessionId: "verifier-session",
+		invocationToken: "verifier-token",
 	});
 	return { applied, verifierSessionId: "verifier-session", seq };
 }

@@ -22,12 +22,14 @@ Estado a la fecha del checkpoint 12. Se actualiza con evidencia, no con "los tes
 | `bounty_report` calcula el score y escribe el reporte validado | tests + flujo vivo |
 | Flujo completo en el lab: recon → finding → verificador real → verified → reporte | `docs/evidence/s43-live-run.md` |
 | Kit de prueba con archivo previo y criterio de aceptación para (iii) | tests del kit |
+| Escenario (iii) en vivo: bloqueo, registro `gate`, sin `execution` | corrida del operador (R11) |
+| Verificador firmado por invocación (HMAC), veredicto sin token rechazado | tests (`verifier-signature`) |
 
 ## Pendiente
 
 | Qué | Riesgo si se saltea |
 |---|---|
-| **Escenario (iii) en vivo** (salir de scope y ver el mensaje exacto en `status.md`) | El gate está probado, pero no lo viste bloquear en una sesión real. Es el último tramo de S43 |
+| ~~Escenario (iii) en vivo~~ | **Verificado en R11**: bloqueo con mensaje legible, un registro `gate`, ningún `execution`. S43 completo |
 | Escribir el scope de un programa real (humano, con `docs/COMO-ESCRIBIR-UN-SCOPE.md`) | Un scope mal escrito es el único error que puede cruzar la línea roja #1 |
 | Métricas modificadas (`M*`) de CVSS | Se rechazan; si el programa exige vector ambiental, no hay reporte |
 | Segundo anclaje real-world de CVSS | Deuda declarada; la validación descansa en la tabla oficial + invariantes |
@@ -38,7 +40,7 @@ Estado a la fecha del checkpoint 12. Se actualiza con evidencia, no con "los tes
 
 **GO condicionado** para un programa real de alcance chico, con `rate_rps` explícito, después de:
 
-1. Correr el escenario (iii) en vivo una vez (2 minutos, el kit lo imprime).
+1. (hecho) Escenario (iii) en vivo: verificado en R11.
 2. Escribir el scope con `docs/COMO-ESCRIBIR-UN-SCOPE.md` y leer el resumen de `bounty_scope` antes de
    confirmar.
 3. Primera sesión corta y con `status.md` a la vista.

@@ -58,6 +58,8 @@ export interface RunResult {
 	durationMs: number;
 	/** D1: identity of the child session, generated here, never by the model. */
 	sessionId: string;
+	/** Task 7: the token the child's session signs its executions with. */
+	invocationToken: string;
 	error?: string;
 }
 
@@ -224,6 +226,7 @@ export function createPiRunner(options: PiRunnerOptions = {}): PiRunner {
 		run(request) {
 			const started = now();
 			const sessionId = randomUUID();
+			const invocationToken = randomUUID();
 			const { command, args } = buildChildArgs(request, options);
 			const timeoutMs = request.timeoutMs ?? defaultTimeoutMs;
 
@@ -235,7 +238,13 @@ export function createPiRunner(options: PiRunnerOptions = {}): PiRunner {
 
 				const child = spawn(command, args, {
 					cwd: request.cwd,
-					env: { ...process.env, ...(request.env ?? {}), GENTLE_BOUNTY_CHILD: "1", GENTLE_BOUNTY_SESSION_ID: sessionId },
+					env: {
+						...process.env,
+						...(request.env ?? {}),
+						GENTLE_BOUNTY_CHILD: "1",
+						GENTLE_BOUNTY_SESSION_ID: sessionId,
+						GENTLE_BOUNTY_INVOCATION_TOKEN: invocationToken,
+					},
 					stdio: ["ignore", "pipe", "pipe"],
 				});
 
@@ -257,6 +266,7 @@ export function createPiRunner(options: PiRunnerOptions = {}): PiRunner {
 						exitCode,
 						durationMs: now() - started,
 						sessionId,
+						invocationToken,
 						...(error !== undefined ? { error } : violation !== undefined ? { error: violation } : {}),
 					});
 				};
