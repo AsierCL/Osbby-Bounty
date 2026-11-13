@@ -75,9 +75,18 @@ anterior), así que a las 23:39Z en UTC+1 ya era otro día y el archivo cambiaba
 "cualquiera puede reescribir el historial tocando el YAML" y que la cadena había pasado de 5 registros
 a 1.
 
-**Refutado, con hashes**: la cadena de 5 registros está íntegra y verifica (ver abajo, R13). Lo que
-pasó es que el directorio de trabajo se archivó a propósito y el store nuevo arranca en seq 1. Nada se
+**Refutado, con hashes**: la cadena de 5 registros está íntegra y verifica (ver abajo, R13). Nada se
 perdió ni se reescribió.
+
+**Qué pasó con el directorio (dato del operador, S75)**: copió a mano
+`cp -r work/lab-s43 work/lab-s43-archivo` y después corrió `s43-cleanup.sh`, que en esa versión hacía
+`rm -rf work/lab-s43`. El script de preparación **no archivó nada**: el `cp` manual salvó la evidencia y
+el cleanup borró el original. Por eso no existe ningún `lab-s43-archivo-<timestamp>`. El store nuevo
+arranca en seq 1 porque es un directorio nuevo, no porque se haya reescrito el historial.
+
+Ese cleanup se arregló en S75/tarea 1: ahora archiva en `work/<programa>-archivo-<YYYYMMDD-HHMMSS>` y
+avisa la ruta; solo borra el marcador y el stub. Ver `docs/evidence/s43-live-run.md` R13 y el test
+`tests/cleanup-archives.test.ts`.
 
 Arreglado en S74: `authorized_on` es constante y el kit es idempotente (no archiva ni reescribe si el
 scope es idéntico), con test de reloj falso cruzando medianoche.

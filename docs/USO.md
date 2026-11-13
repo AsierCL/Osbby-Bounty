@@ -28,6 +28,32 @@ Antes de arrancar en serio, podés ver exactamente qué se va a ejecutar, sin la
 bin/gentle-bounty acme --check
 ```
 
+Y podés revisar el alcance **sin abrir sesión**: imprime el mismo resumen interpretado que
+`bounty_scope`, más avisos legibles (wildcard que cubre todos los puertos, falta de `out_of_scope`,
+ritmo ausente o alto, `lab: false` con fecha de autorización ausente o futura). Es de solo lectura y no
+toca la red:
+
+```bash
+bin/gentle-bounty --preflight acme
+```
+
+La sesión arranca **sin el catálogo de skills** de tu Pi (`-ns`): las instrucciones de bounty son las
+del paquete, y nada más. También los subagentes.
+
+## Configuración del reporte
+
+En `.bounty/config.json`, solo lo edita el humano:
+
+```json
+{ "report_lang": "es", "report_redact": true }
+```
+
+- `report_lang`: `"en"` por defecto; `"es"` para el laboratorio. El modelo no ve estos valores como
+  parámetros de herramienta, los aplica el código al escribir el reporte.
+- `report_redact`: `true` por defecto. Enmascara `Cookie`, `Authorization`, tokens y datos personales
+  de terceros (emails, tarjetas) **en el reporte escrito**. No cambia lo que ve el modelo, que sigue sin
+  redacción para poder trabajar.
+
 ## Las tres pausas
 
 Solo tres. Entre ellas, el agente trabaja solo.

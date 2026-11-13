@@ -23,6 +23,10 @@ export interface GlobalConfig {
 	mcp: string[];
 	redaction: "off" | "on";
 	budget: BudgetConfig;
+	/** S75/task 3d: redact secrets and third-party personal data in the written report. Default on. */
+	reportRedact: boolean;
+	/** S75/task 3f: language of the written report. Default "en"; the lab uses "es". */
+	reportLang: "en" | "es";
 }
 
 export const DEFAULT_CONFIG: GlobalConfig = {
@@ -31,9 +35,11 @@ export const DEFAULT_CONFIG: GlobalConfig = {
 	mcp: [],
 	redaction: "off",
 	budget: {},
+	reportRedact: true,
+	reportLang: "en",
 };
 
-const KNOWN_KEYS = new Set(["fetch_allow", "tool_path", "mcp", "redaction", "budget", "accounts"]);
+const KNOWN_KEYS = new Set(["fetch_allow", "tool_path", "mcp", "redaction", "budget", "accounts", "report_redact", "report_lang"]);
 const KNOWN_BUDGET_KEYS = new Set(["max_wall_ms", "max_tool_calls", "max_tokens"]);
 
 export function parseGlobalConfig(text: string): { ok: true; config: GlobalConfig } | { ok: false; errors: string[] } {
@@ -85,6 +91,18 @@ export function parseGlobalConfig(text: string): { ok: true; config: GlobalConfi
 		else redaction = doc.redaction;
 	}
 
+	let reportRedact = true;
+	if (doc.report_redact !== undefined) {
+		if (typeof doc.report_redact !== "boolean") errors.push("report_redact must be true or false");
+		else reportRedact = doc.report_redact;
+	}
+
+	let reportLang: "en" | "es" = "en";
+	if (doc.report_lang !== undefined) {
+		if (doc.report_lang !== "en" && doc.report_lang !== "es") errors.push(`report_lang must be "en" or "es"`);
+		else reportLang = doc.report_lang;
+	}
+
 	const budget: BudgetConfig = {};
 	if (doc.budget !== undefined) {
 		if (typeof doc.budget !== "object" || doc.budget === null || Array.isArray(doc.budget)) {
@@ -109,7 +127,7 @@ export function parseGlobalConfig(text: string): { ok: true; config: GlobalConfi
 	}
 
 	if (errors.length > 0) return { ok: false, errors };
-	return { ok: true, config: { toolPath, fetchAllow, mcp, redaction, budget } };
+	return { ok: true, config: { toolPath, fetchAllow, mcp, redaction, budget, reportRedact, reportLang } };
 }
 
 /** Loads `.bounty/config.json`. A missing file means the defaults, not an error. */

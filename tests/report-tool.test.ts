@@ -40,6 +40,7 @@ async function sessionWithFinding(verified: boolean): Promise<{ dir: string; ses
 }
 
 const FIELDS = {
+	summary: "El IDOR permite leer facturas de otro usuario cambiando el id. El verificador lo reprodujo dos veces.",
 	steps: ["GET /api/invoices/1 como alice", "GET /api/invoices/2 como alice", "repetir el segundo"],
 	impact: "Se leen facturas de otro usuario.",
 	remediation: "Verificar propiedad del recurso.",
@@ -57,6 +58,7 @@ test("a verified finding produces a report with the score computed from the metr
 		assert.match(report, /CVSS:4\.0\/AV:N/);
 		assert.match(report, /sha256 [0-9a-f]{16}/);
 		assert.match(report, /^1\. GET/m);
+		assert.match(report, /## Prerequisites/);
 		const status = await readFile(h.session.paths.statusFile, "utf8");
 		assert.match(status, /espera envío humano|lo mandás vos/);
 	} finally {

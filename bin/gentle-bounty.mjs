@@ -46,7 +46,9 @@ export function buildLaunch({ program, root, probeFile, approvedMcp, extra = [] 
 		// MCP stays the operator's decision: without an explicit opt-in, no MCP server is reachable.
 		args.push("--no-mcp");
 	}
-	args.push("-ne", "-e", join(root, "extensions", "bounty.ts"));
+	// S75/task 5: the bounty session does not need the host's skill catalog. With skills off, the
+	// session starts with its own instructions and nothing else from the global registry.
+	args.push("-ne", "-ns", "-e", join(root, "extensions", "bounty.ts"));
 	if (probeFile) {
 		const probeTarget = join(workDir, "probe-tools.json");
 		if (resolve(probeFile) === probeTarget) throw new Error("the probe output path must not be the probe extension itself");
@@ -67,6 +69,7 @@ export function buildLaunch({ program, root, probeFile, approvedMcp, extra = [] 
 
 async function preflight(program, root) {
 	const { parseScope } = await import("../src/core/scope.ts");
+	const { preflightScope } = await import("../src/core/preflight.ts");
 	const { loadGlobalConfig } = await import("../src/core/config.ts");
 	const { execFileSync } = await import("node:child_process");
 	const { existsSync, readFileSync } = await import("node:fs");
@@ -104,12 +107,16 @@ async function preflight(program, root) {
 			policy = parsed.policy;
 			ok(`el scope parsea y declara lab: ${parsed.policy.lab}`);
 			for (const warning of parsed.warnings) warn(`el scope avisa: ${warning}`);
+			// S75/task 4: the same interpreted summary bounty_scope prints, plus its warnings.
+			const interpreted = preflightScope(readFileSync(scopePath, "utf8"));
+			lines.push("", "--- resumen interpretado ---", interpreted.text, "");
 		}
 	}
 
 	// 3. rate declared
 	if (policy !== null) {
-		if (policy.limits.rateRps === null) fail("el scope no declara limits.rate_rps: sin eso el gate niega todo");
+		if (policy.limits.rateRps === null) warn("el scope no declara limits.rate_rps: el gate va a 1 req/s por defecto");
+		else if (policy.limits.rateRps > 10) warn(`el ritmo declarado (${policy.limits.rateRps} req/s) está por encima de lo prudente (10 req/s)`);
 		else ok(`ritmo declarado: ${policy.limits.rateRps} req/s`);
 	}
 

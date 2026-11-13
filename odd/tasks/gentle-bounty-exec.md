@@ -1811,3 +1811,45 @@ Tareas cerradas:
    explicación simple (sesión reusada, script re-ejecutado, directorio archivado).
 
 Estado: **298 tests, 0 fallos**.
+
+### L27 — S75: el cleanup borraba evidencia; correcciones del informe
+
+**Corrección del operador a L26/R12**: el directorio con timestamp no existe porque hizo
+`cp -r work/lab-s43 work/lab-s43-archivo` a mano y después `s43-cleanup.sh` borró `work/lab-s43` con
+`rm -rf`. El script de preparación no archivó nada. La explicación de "5 → 1" queda corregida en
+`docs/evidence/s43-live-run.md`: directorio nuevo, no historial reescrito. Y el cleanup ya no borra:
+archiva con timestamp y avisa (`tests/cleanup-archives.test.ts`).
+
+Tareas de S75: 1 cleanup que archiva; 2 flujo vivo con la firma y reporte escrito por el modelo;
+3 calidad del reporte (resumen ≠ título, condiciones derivadas del vector, evidencia extraída de la
+cadena, redacción por defecto, pasos esperado/observado, `report_lang`); 4 preflight de scope sin
+sesión; 5 cargar o no las skills de gentle-pi en la sesión de bounty; 6 `GO-NO-GO.md`.
+
+### L28 — S75 tarea 2: la corrida viva FALLÓ, con causa identificada
+
+Corrida real (20:48-20:50, lab en 8787, modelo real). Falló en el verificador y **no** escribió
+reporte. Lo que pasó, con la transcripción del hijo delante:
+
+1. El hijo del verificador recibió la tarea **sin el nombre del programa** (`buildVerifierTask` no lo
+   incluye). Adivinó `program: "lab"`, listó `work/` y encontró un `work/lab/scope.yaml` viejo (puerto
+   33971) de corridas anteriores.
+2. `bounty_run` con `program: "lab"` → "no scope loaded" (nunca cargó un alcance para ese programa).
+   `bounty_scope` con `work/lab/scope.yaml` → resumen correcto, pero "No cargo el alcance" (sin
+   confirmación humana; el hijo no puede confirmar).
+3. **El hijo no ejecutó nada**: 0 registros `execution` con su `sessionId`
+   (`18a2b9b0-…`). Sus propios `find`/`bounty_status` confirman que ni siquiera vio `work/lab-flow`.
+4. Respondió `NO_REPRODUCIDO`, `seqs: []`, con un motivo explicando que no pudo cargar el alcance.
+5. `applyVerifierVerdict` **aceptó** ese veredicto y pasó `F-0001` de `verified` a `rejected`. Un
+   verificador que no pudo correr se tomó como prueba de no-reproducción.
+6. La firma no llegó a ejercitarse en esta corrida (el hijo no ejecutó). Sí quedó probada en vivo con
+   una sonda aparte: el hijo real con el mismo runner escribió `seq 30` con
+   `signature: be80680613…`.
+
+Registros: `work/lab-flow/evidence` seq 25/27 son del **recon de la sesión principal** (sin firma por
+diseño, la sesión principal no tiene token); `verifierSessionId` del veredicto es `18a2b9b0-…`, sin
+ninguna ejecución.
+
+**Dos defectos para decidir, no parcheados a ciegas**:
+- A. `buildVerifierTask` no dice el programa ni la ruta del alcance ⇒ el hijo adivina.
+- B. `NO_REPRODUCIDO` sin ninguna ejecución firmada del hijo no es evidencia de nada: debería quedar
+  como "no utilizable" y no tocar el estado del hallazgo.

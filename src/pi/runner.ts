@@ -120,6 +120,8 @@ export function buildChildArgs(request: RunRequest, options: PiRunnerOptions = {
 		"json",
 		"--no-mcp",
 		"-ne",
+		// S75/task 5: a bounty child needs its own instructions and tool allowlist, not the host's skills.
+		"-ns",
 		...extensions.flatMap((entry) => ["-e", entry]),
 		"--tools",
 		request.agent.tools.join(","),

@@ -509,3 +509,21 @@ export function evaluate(
 		reason: `no in_scope rule matched ${host}${port === null ? "" : `:${port}`}${path}`,
 	};
 }
+
+/**
+ * S75/task 4: one interpreted summary, shared by bounty_scope and the offline preflight, so the
+ * preflight cannot describe a scope differently from the session that will use it.
+ */
+export function summarizeScope(policy: ScopePolicy, warnings: string[] = [], ambiguities: string[] = []): string {
+	return [
+		`Programa: ${policy.program}${policy.lab ? " (laboratorio)" : " (programa real)"}`,
+		`En alcance: ${policy.inScope.length} regla(s)`,
+		...policy.inScope.map((rule) => `  - ${rule.raw}`),
+		`Fuera de alcance: ${policy.outOfScope.length} regla(s)`,
+		...policy.outOfScope.map((rule) => `  - ${rule.raw}`),
+		`Ritmo declarado: ${policy.limits.rateRps ?? "sin declarar"} req/s`,
+		`Métodos: ${policy.limits.allowedMethods.join(", ") || "sin restricción"}`,
+		...(warnings.length > 0 ? ["Avisos:", ...warnings.map((warning) => `  - ${warning}`)] : []),
+		...(ambiguities.length > 0 ? ["A confirmar:", ...ambiguities.map((item) => `  - ${item}`)] : []),
+	].join("\n");
+}

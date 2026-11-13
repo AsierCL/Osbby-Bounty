@@ -224,13 +224,14 @@ test("the positive path: two reproductions, a verified finding and a report that
 		const report = await h.session.report({
 			findingId: id as string,
 			metrics: { AV: "N", AC: "L", AT: "N", PR: "N", UI: "N", VC: "H", VI: "N", VA: "N", SC: "N", SI: "N", SA: "N" },
+			summary: "El IDOR permite leer facturas de otro usuario cambiando el id. El verificador lo reprodujo dos veces.",
 			steps: ["GET /api/invoices/1 como alice", "GET /api/invoices/2 como alice", "repetir el segundo"],
 			impact: "Se leen facturas de otro usuario.",
 			remediation: "Verificar propiedad del recurso.",
 		});
 		assert.equal(report.ok, true, report.text);
 		const markdown = await readFile(join(h.dir, "work", "lab", "reports", `${id}.md`), "utf8");
-		const check = validateReport(markdown);
+		const check = validateReport(markdown, "en");
 		assert.equal(check.ok, true, `report missing: ${check.missing.join(", ")}`);
 		assert.match(markdown, /CVSS:4\.0\//);
 		assert.match(markdown, /sha256 [0-9a-f]{16}/);

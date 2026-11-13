@@ -20,9 +20,9 @@ import { createFindingsStore, type Finding, type FindingsStore } from "../core/f
 import { gate, type DnsResolver, type GateRequest } from "../core/gate.ts";
 import { createRateLimiter, type Limiter } from "../core/ratelimit.ts";
 import { requestViewForModel, responseViewForModel, type RedactionMode } from "../core/redact.ts";
-import { parseScope, evaluate, type ScopePolicy } from "../core/scope.ts";
+import { parseScope, evaluate, summarizeScope, type ScopePolicy } from "../core/scope.ts";
 import { scoreVector } from "../core/cvss.ts";
-import { renderReport, validateReport } from "../core/report.ts";
+import { extractEvidence, renderReport, validateReport, validateReportText } from "../core/report.ts";
 import { randomUUID } from "node:crypto";
 import { signExecution, verifyExecutionSignature } from "../core/attestation.ts";
 import { createStatusStore, renderStatus, writeStatusFile, type BountyPhase, type ProgramState, type StatusStore } from "../core/status.ts";
@@ -37,6 +37,10 @@ export interface ProgramConfig {
 	sessionId?: string;
 	/** Task 7: the runner's per-invocation token. When set, execution records are signed. */
 	invocationToken?: string;
+	/** S75/task 3d: redact the written report. Operator-level, default on. */
+	reportRedact?: boolean;
+	/** S75/task 3f: written report language. Operator-level, default "en". */
+	reportLang?: "en" | "es";
 	now?: () => number;
 }
 
@@ -113,6 +117,8 @@ export interface ProgramSession {
 		steps?: string[];
 		impact?: string;
 		remediation?: string;
+		cwe?: string;
+		sensitiveData?: string;
 	}): Promise<ToolResult>;
 	status(): Promise<ToolResult>;
 }
@@ -149,6 +155,8 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 	const redaction: RedactionMode = config.redaction ?? "off";
 	const sessionId = config.sessionId ?? randomUUID();
 	const invocationToken = config.invocationToken ?? null;
+	const reportRedact = config.reportRedact ?? true;
+	const reportLang: "en" | "es" = config.reportLang ?? "en";
 
 	let policy: ScopePolicy | null = null;
 	let scopePath: string | null = null;
@@ -183,6 +191,7 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 					kind: "verification",
 					payload: { event, finding: input.findingId, verdict: input.verdict, seqs: input.seqs, verifierSessionId: input.verifierSessionId, detail, at: new Date(now()).toISOString(), sessionId },
 				});
+				await status.setLastVerification({ at: new Date(now()).toISOString(), finding: input.findingId, event, detail });
 				await status.note(`verificación ${input.findingId}: ${event} — ${detail}`);
 				await refresh(applied ? "El veredicto se aplicó: revisá status.md." : "El veredicto no se pudo aplicar: el hallazgo sigue como candidato.");
 				return { ok: applied, text: detail };
@@ -310,17 +319,7 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				ambiguities.push(`el programa exige cabeceras: ${Object.keys(parsed.policy.requiredHeaders).join(", ")}`);
 			}
 
-			const summary = [
-				`Programa: ${parsed.policy.program}${parsed.policy.lab ? " (laboratorio)" : " (programa real)"}`,
-				`En alcance: ${parsed.policy.inScope.length} regla(s)`,
-				...parsed.policy.inScope.map((rule) => `  - ${rule.raw}`),
-				`Fuera de alcance: ${parsed.policy.outOfScope.length} regla(s)`,
-				...parsed.policy.outOfScope.map((rule) => `  - ${rule.raw}`),
-				`Ritmo declarado: ${parsed.policy.limits.rateRps ?? "sin declarar"} req/s`,
-				`Métodos: ${parsed.policy.limits.allowedMethods.join(", ") || "sin restricción"}`,
-				...(parsed.warnings.length > 0 ? ["Avisos:", ...parsed.warnings.map((warning) => `  - ${warning}`)] : []),
-				...(ambiguities.length > 0 ? ["A confirmar:", ...ambiguities.map((item) => `  - ${item}`)] : []),
-			].join("\n");
+			const summary = summarizeScope(parsed.policy, parsed.warnings, ambiguities);
 
 			if (alreadyConfirmed) {
 				await refresh("El alcance ya estaba confirmado para este mismo archivo: sigo.");
@@ -723,15 +722,36 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			if ("ok" in scored) return { ok: false, text: `El vector no es válido: ${scored.errors.join("; ")}` };
 
 			const records = await evidence.read();
+			const all = await evidence.read();
+			const lastVerification = [...all].reverse().find((record) => record.kind === "verification");
+			const reproSeqs = lastVerification === undefined ? [] : ((lastVerification.payload as { seqs?: number[] }).seqs ?? []);
+			const initialSeq =
+				records
+					.filter((record) => record.kind === "execution")
+					.map((record) => ({ record, payload: record.payload as { endpoint?: string; argv?: string[] } }))
+					.find(({ payload }) => payload.endpoint === finding.endpoint || (payload.argv ?? []).join(" ").includes(finding.endpoint))?.record.seq ?? null;
+
+			const summary = input.summary ?? "";
+			const textCheck = validateReportText({ title: finding.title, summary, impact: input.impact ?? "", vector, lang: reportLang });
+			if (!textCheck.ok) return { ok: false, text: `El reporte no cumple la checklist: ${textCheck.errors.join("; ")}.` };
+
 			const markdown = renderReport({
 				finding: { ...finding, cvss: vector, score: scored.score },
-				evidence: records.filter((record) => ["execution", "execution-result", "request", "response", "http-request", "http-response", "observation"].includes(record.kind)),
+				records,
 				program: config.program,
-				reproductionSteps: input.steps ?? [],
+				summary,
+				steps: input.steps ?? [],
 				impact: input.impact ?? "",
 				remediation: input.remediation ?? "",
+				cwe: input.cwe ?? null,
+				sensitiveData: input.sensitiveData ?? null,
+				lang: reportLang,
+				redact: reportRedact,
+				reproSeqs,
+				initialSeq,
+				warnings: textCheck.warnings,
 			});
-			const check = validateReport(markdown);
+			const check = validateReport(markdown, reportLang);
 			if (!check.ok) return { ok: false, text: `El reporte no cumple la checklist: falta ${check.missing.join(", ")}.` };
 
 			await mkdir(join(workspace, "reports"), { recursive: true });

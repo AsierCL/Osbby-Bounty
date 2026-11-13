@@ -140,6 +140,8 @@ export default function bountyExtension(pi: PiLike): void {
 				...(process.env.GENTLE_BOUNTY_INVOCATION_TOKEN === undefined ? {} : { invocationToken: process.env.GENTLE_BOUNTY_INVOCATION_TOKEN }),
 				redaction: config?.redaction ?? redactionMode(),
 				budget: config?.budget,
+				reportRedact: config?.reportRedact ?? true,
+				reportLang: config?.reportLang ?? "en",
 			},
 			{
 				dns: resolveForGate,
@@ -415,6 +417,8 @@ export default function bountyExtension(pi: PiLike): void {
 				steps: { type: "array", items: { type: "string" } },
 				impact: { type: "string" },
 				remediation: { type: "string" },
+				cwe: { type: "string" },
+				sensitive_data: { type: "string" },
 			},
 			required: ["program", "finding_id", "metrics"],
 		} as never,
@@ -428,6 +432,8 @@ export default function bountyExtension(pi: PiLike): void {
 				...(Array.isArray(params.steps) ? { steps: params.steps.map(String) } : {}),
 				...(params.impact === undefined ? {} : { impact: String(params.impact) }),
 				...(params.remediation === undefined ? {} : { remediation: String(params.remediation) }),
+				...(params.cwe === undefined ? {} : { cwe: String(params.cwe) }),
+				...(params.sensitive_data === undefined ? {} : { sensitiveData: String(params.sensitive_data) }),
 			});
 			return text(result.text, { ok: result.ok });
 		},

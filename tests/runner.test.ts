@@ -52,6 +52,7 @@ test("the child argv is explicit: json mode, no MCP, no other extensions, tool a
 		"json",
 		"--no-mcp",
 		"-ne",
+		"-ns",
 		"-e",
 		ENTRY,
 		"--tools",
@@ -92,7 +93,7 @@ test("the child actually received the argv contract, and the bounty env marker",
 			const result = await child.run(request());
 			assert.equal(result.ok, true, result.error);
 			const recorded = JSON.parse(await readFile(argvFile, "utf8"));
-			assert.deepEqual(recorded.argv.slice(0, 8), ["--mode", "json", "--no-mcp", "-ne", "-e", ENTRY, "--tools", "read,grep,bounty_run"]);
+			assert.deepEqual(recorded.argv.slice(0, 9), ["--mode", "json", "--no-mcp", "-ne", "-ns", "-e", ENTRY, "--tools", "read,grep,bounty_run"]);
 			assert.equal(recorded.env.GENTLE_BOUNTY_CHILD, "1");
 		} finally {
 			if (previous === undefined) delete process.env.FAKE_PI_ARGV_FILE;

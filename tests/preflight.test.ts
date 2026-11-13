@@ -7,7 +7,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,6 +34,8 @@ function preflight(root: string, program = "lab", env: Record<string, string> = 
 }
 
 const SCOPE = `program: lab\nlab: true\nauthorized_on: 2026-11-11\nin_scope:\n  - 127.0.0.1:3000\nlimits:\n  rate_rps: 5\n`;
+
+const REPO = new URL("..", import.meta.url).pathname;
 
 async function withRoot<T>(run: (root: string) => Promise<T>, scope: string = SCOPE): Promise<T> {
 	const root = await mkdtemp(join(tmpdir(), "bounty-preflight-"));
@@ -87,12 +89,12 @@ test("a preload variable also means NO", async () => {
 	});
 });
 
-test("a scope without rate_rps is a failure, not a warning", async () => {
+test("a scope without rate_rps is a warning: the gate falls back to 1 req/s", async () => {
 	await withRoot(
 		async (root) => {
 			const result = preflight(root);
-			assert.equal(result.status, 1, result.out);
-			assert.match(result.out, /no declara limits\.rate_rps/);
+			assert.match(result.out, /AVISO el scope no declara limits\.rate_rps/);
+			assert.doesNotMatch(result.out, /FALLA el scope no declara limits\.rate_rps/);
 		},
 		"program: lab\nlab: true\nin_scope:\n  - 127.0.0.1:3000\nlimits:\n  allowed_methods:\n    - GET\n",
 	);
@@ -160,5 +162,14 @@ test("the preflight never launches a session: pi is not required on PATH", async
 		// Whatever the verdict, it must be a verdict, not a spawn failure.
 		assert.match(result.out, /VEREDICTO/);
 		assert.ok(!/could not start pi/.test(result.out), result.out);
+	});
+});
+
+test("the launcher disables the host skill catalog for the bounty session (S75/task 5)", async () => {
+	await withRoot(async () => {
+		const result = spawnSync(process.execPath, [join(REPO, "bin", "gentle-bounty.mjs"), "--check", "lab"], { encoding: "utf8", cwd: REPO });
+		assert.equal(result.status, 0, result.stderr);
+		const args = JSON.parse(result.stdout).args;
+		assert.ok(args.includes("-ns"), "the bounty session must not load the gentle-pi skills");
 	});
 });

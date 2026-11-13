@@ -28,16 +28,29 @@ const finding: Finding = {
 	updatedAt: "2026-11-11T00:00:00Z",
 };
 
-const evidence = [{ seq: 3, kind: "execution-result", ts: "2026-11-11T00:00:00Z", hash: "a".repeat(64) }];
+const ts = "2026-11-11T00:00:00Z";
+const records = [
+	{ seq: 1, kind: "execution", ts, hash: "b".repeat(64), payload: { tool: "curl", argv: ["curl", "http://127.0.0.1:3000/api/invoices/2"], endpoint: "/api/invoices/2" } },
+	{ seq: 2, kind: "execution-result", ts, hash: "c".repeat(64), payload: { tool: "curl", exitCode: 0, stdout: "{\"id\":2}\n200", stderr: "" } },
+	{ seq: 3, kind: "execution-result", ts, hash: "a".repeat(64), payload: { tool: "curl", exitCode: 0, stdout: "{\"id\":2}\n200", stderr: "" } },
+	{ seq: 4, kind: "verification", ts, hash: "d".repeat(64), payload: { seqs: [3] } },
+] as never[];
 
 function report(overrides: Partial<Parameters<typeof renderReport>[0]> = {}) {
 	return renderReport({
 		finding,
-		evidence,
+		records,
 		program: "lab",
-		reproductionSteps: ["GET /api/invoices/1", "GET /api/invoices/2", "repetir"],
+		summary: "Un IDOR permite leer facturas ajenas. El verificador lo reprodujo dos veces.",
+		steps: ["GET /api/invoices/1", "GET /api/invoices/2", "repetir"],
 		impact: "Lectura de datos ajenos.",
 		remediation: "Verificar propiedad.",
+		cwe: null,
+		sensitiveData: null,
+		lang: "es",
+		redact: true,
+		reproSeqs: [3],
+		initialSeq: 1,
 		...overrides,
 	});
 }
@@ -51,7 +64,7 @@ test("the canonical report carries severity, steps, hashes, impact and remediati
 	if (!("ok" in computed)) {
 		assert.match(markdown, new RegExp(`\\*\\*Severidad:\\*\\* ${computed.score.toFixed(1)} \\(`));
 	}
-	assert.ok(!markdown.includes("Aviso:"), "the stored score matches the computed one, so no warning");
+	assert.ok(!markdown.includes("**Aviso:** el score guardado"), "the stored score matches the computed one, so no warning");
 	assert.match(markdown, /^1\. GET \/api\/invoices\/1/m);
 	assert.match(markdown, /sha256 a{16}/);
 	assert.match(markdown, /## Impacto/);
@@ -72,13 +85,13 @@ test("a report without a CVSS vector is rejected by the checklist", () => {
 });
 
 test("a report without evidence hashes is rejected", () => {
-	const check = validateReport(report({ evidence: [] }));
+	const check = validateReport(report({ reproSeqs: [], initialSeq: null }));
 	assert.equal(check.ok, false);
 	assert.ok(check.missing.includes("evidencia con hash"));
 });
 
 test("a report without numbered reproduction steps is rejected", () => {
-	const check = validateReport(report({ reproductionSteps: [] }));
+	const check = validateReport(report({ steps: [] }));
 	assert.equal(check.ok, false);
 	assert.ok(check.missing.includes("pasos numerados"));
 });

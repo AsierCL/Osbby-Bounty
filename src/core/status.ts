@@ -39,6 +39,8 @@ export interface ProgramState {
 	lastConfirmation: ConfirmationEvent | null;
 	/** Task 3: retired "the scope changed" notes, kept as dated history instead of live noise. */
 	scopeEvents: { at: string; text: string }[];
+	/** S75/task 2: the last verifier verdict, so status.md shows verification as a dated event. */
+	lastVerification: { at: string; finding: string; event: string; detail: string } | null;
 	nextStep: string;
 	notes: string[];
 	updatedAt: string;
@@ -144,6 +146,13 @@ export function renderStatus(input: {
 	lines.push("## Qué sigue");
 	lines.push("");
 	lines.push(state.nextStep || NEXT_PHASE[state.phase]);
+	const lastVerification = state.lastVerification ?? null;
+	if (lastVerification !== null) {
+		lines.push("", "## Verificación");
+		lines.push("");
+		lines.push(`- ${lastVerification.finding}: ${lastVerification.event} — ${lastVerification.detail}`);
+		lines.push(`- Cuándo: ${lastVerification.at.replace("T", " ").slice(0, 19)} UTC`);
+	}
 	const scopeEvents = state.scopeEvents ?? [];
 	if (scopeEvents.length > 0) {
 		lines.push("", "## Historial del alcance");
@@ -167,6 +176,7 @@ export interface StatusStore {
 	confirmScope(hash?: string): Promise<ProgramState>;
 	setScopeHash(hash: string | null): Promise<ProgramState>;
 	setLastConfirmation(event: ConfirmationEvent | null): Promise<ProgramState>;
+	setLastVerification(event: { at: string; finding: string; event: string; detail: string } | null): Promise<ProgramState>;
 	retireScopeNotes(): Promise<ProgramState>;
 	note(text: string): Promise<ProgramState>;
 	file(): string;
@@ -193,6 +203,7 @@ export function createStatusStore(options: { workDir: string; program: string; n
 			pending: null,
 			lastConfirmation: null,
 			scopeEvents: [],
+			lastVerification: null,
 			nextStep: "",
 			notes: [],
 			updatedAt: new Date(now()).toISOString(),
@@ -249,6 +260,13 @@ export function createStatusStore(options: { workDir: string; program: string; n
 				state.scopeHash = hash;
 			}
 			if (state.pending?.kind === "scope") state.pending = null;
+			await this.write(state);
+			return state;
+		},
+
+		async setLastVerification(event: { at: string; finding: string; event: string; detail: string } | null) {
+			const state = await this.read();
+			state.lastVerification = event;
 			await this.write(state);
 			return state;
 		},
