@@ -12,6 +12,8 @@ import { createServer, type Server } from "node:http";
 export interface Lab {
 	port: number;
 	requests: { method: string; path: string; user: string | null }[];
+	/** S81/task 2: mutations the lab actually received, in memory only. */
+	mutations: string[];
 	close(): Promise<void>;
 }
 
@@ -20,6 +22,7 @@ const INJECTED =
 
 export async function startLab(port = 0): Promise<Lab> {
 	const requests: Lab["requests"] = [];
+	const mutations: string[] = [];
 	const server: Server = createServer((req, res) => {
 		const path = (req.url ?? "/").split("?")[0] ?? "/";
 		const user = typeof req.headers["x-user"] === "string" ? req.headers["x-user"] : null;
@@ -51,6 +54,26 @@ export async function startLab(port = 0): Promise<Lab> {
 			return;
 		}
 
+		// S81/task 2: a GraphQL endpoint whose mutations only append to an in-memory list. Enough to
+		// exercise the destructive pause without any real side effect.
+		if (path === "/graphql") {
+			if ((req.method ?? "GET") !== "POST") {
+				res.writeHead(405, { "content-type": "application/json" });
+				res.end(JSON.stringify({ error: "POST only" }));
+				return;
+			}
+			let raw = "";
+			req.on("data", (chunk) => {
+				raw += String(chunk);
+			});
+			req.on("end", () => {
+				if (/\bmutation\b/i.test(raw)) mutations.push(raw.slice(0, 200));
+				res.writeHead(200, { "content-type": "application/json" });
+				res.end(JSON.stringify({ data: { addNote: { ok: true } } }));
+			});
+			return;
+		}
+
 		if (path === "/login") {
 			res.writeHead(401, { "content-type": "application/json" });
 			res.end(JSON.stringify({ error: "invalid credentials" }));
@@ -73,6 +96,7 @@ export async function startLab(port = 0): Promise<Lab> {
 	return {
 		port: boundPort,
 		requests,
+		mutations,
 		close: () =>
 			new Promise<void>((resolve) => {
 				server.close(() => resolve());

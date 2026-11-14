@@ -47,6 +47,53 @@ lineal del programa.
 
 **Estado: aplazada.** No bloquea fases D ni E. Se corrige cuando convenga.
 
+## Headers: destino de conexión vs entrada de prueba (S81)
+
+Un valor de header se trata como **destino de conexión** solo si de verdad tiene forma de host: URL con
+esquema, host con punto, IP, `localhost` o IPv6 entre corchetes, con puerto opcional. Antes de S81 la
+extracción de `header-host` no aplicaba esa guarda (el escaneo general de argv sí), así que
+`-H "Origin: null"` se convertía en el host `null` y la corrida se denegaba por un host fuera de scope
+al que nadie iba a conectarse.
+
+**Headers de prueba, nunca de enrutamiento** — el gate **no** los valida contra el scope, porque el
+servidor los usa para decidir *qué devuelve*, no *a dónde se conecta*:
+
+| Header | Para qué se prueba |
+|---|---|
+| `Origin` | CORS: `null`, un origen arbitrario, un origen atacante |
+| `Referer` | CORS/CSRF y comprobaciones de origen |
+
+Todo lo demás sigue validándose igual que antes. En particular, estos pueden decidir el destino real
+(SSRF) y un valor ajeno **bloquea**:
+
+| Header | Por qué |
+|---|---|
+| `Host` | Es el host virtual que el servidor atiende |
+| `X-Forwarded-Host`, `X-Forwarded-Server` | Los proxies los usan para enrutar |
+| `X-Forwarded-For` | Identidad de origen para el enrutamiento y los controles |
+| `Forwarded` | Forma estandarizada de los anteriores |
+
+Y una URL metida en **cualquier otro** header (por ejemplo un callback propio) la sigue encontrando el
+escaneo genérico de argv: la excepción es una lista cerrada de dos nombres, no una puerta abierta.
+
+Los headers de prueba quedan anotados como omitidos en el resultado del gate, para que la evidencia
+muestre por qué no se validaron.
+
+## Mutaciones GraphQL: siempre pausan (S81)
+
+Una petición con `mutation` en el cuerpo GraphQL cambia estado, así que se clasifica como destructiva
+y pasa por la pausa de confirmación, igual que `hydra`. Cuenta cuando:
+
+- `Content-Type: application/json` o `application/graphql` (con o sin `charset`) **y** el cuerpo trae
+  `mutation` fuera de comentarios (`# …`); o
+- el cuerpo es GraphQL crudo que empieza con `mutation`; o
+- el cuerpo es un JSON de GraphQL (`{"query": "mutation …"}` / `operationName`).
+
+**Limitación, explícita**: no se detectan por nombre las mutaciones con efecto financiero (`buy`, `pay`,
+`transfer`) ni los endpoints REST que mutan sin decir "mutation". La regla es una red por **forma**,
+no un juicio: lo que parece inocuo igual pausa, y lo que no dice "mutation" depende del criterio del
+modelo. La clase reportada es `graphql-mutation`, y puede caer en la lista `forbidden` de un programa.
+
 ## Clasificación destructiva: inferida, no declarada (S35)
 
 La clase que declara el modelo **solo suma**. El gate la infiere del binario y del argv:

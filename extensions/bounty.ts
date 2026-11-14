@@ -310,7 +310,7 @@ export default function bountyExtension(pi: PiLike): void {
 				class: { type: "string" },
 				endpoint: { type: "string" },
 				parameter: { type: "string" },
-				state: { type: "string", enum: ["candidate", "verified", "reported", "duplicate", "rejected"] },
+				state: { type: "string", enum: ["candidate", "verified", "disputed", "reported", "duplicate", "rejected"] },
 				confidence: { type: "string", enum: ["low", "medium", "high"] },
 				sensitive: { type: "boolean" },
 				reason: { type: "string" },

@@ -656,20 +656,24 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				};
 			}
 			if (input.action === "update") {
-				if (!input.id || !input.state) return { ok: false, text: "Para actualizar necesito id y state." };
-				// D1: the model never moves a finding to verified/rejected. Only the verifier verdict,
-				// applied by code in applyVerifierVerdict, can do it.
-				if (input.state === "verified" || input.state === "rejected") {
+				if (!input.id) return { ok: false, text: "Para actualizar necesito id." };
+				// D1/S76: the model never moves a finding to verified, rejected or disputed. Only the
+				// verifier verdict, applied by code, and the operator, can do it.
+				if (input.state === "verified" || input.state === "rejected" || input.state === "disputed") {
 					return {
 						ok: false,
 						text: `Un hallazgo solo pasa a ${input.state} por el veredicto del verificador (bounty_verify). El agente que lo encontró no puede marcarlo.`,
 					};
 				}
+				if (input.state === undefined && input.title === undefined && input.confidence === undefined && input.sensitive === undefined) {
+					return { ok: false, text: "Para actualizar necesito algo: state, title, confidence o sensitive." };
+				}
 				try {
 					const updated = await findings.update(
 						input.id,
 						{
-							state: input.state,
+							...(input.state === undefined ? {} : { state: input.state }),
+							...(input.title === undefined ? {} : { title: input.title }),
 							confidence: input.confidence,
 							sensitive: input.sensitive,
 							...(input.cvss === undefined ? {} : { cvss: input.cvss }),

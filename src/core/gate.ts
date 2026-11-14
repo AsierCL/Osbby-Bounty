@@ -89,7 +89,32 @@ const FILE_FLAGS = new Set([
 
 const LIST_FLAGS = new Set(["-l", "--list", "--list-file", "--hosts", "--targets", "-targets", "--host-file"]);
 const URL_IN_TEXT = /[a-z][a-z0-9+.-]*:\/\/[^\s"'<>,)]+/gi;
-const HEADER_HOST = /(?:^|[\s,;])(?:host|x-forwarded-host|x-forwarded-server|forwarded|origin|referer)\s*:\s*([^\s,;]+)/gi;
+/**
+ * S81/task 1: only headers that can decide where the connection goes are read as a destination.
+ * Origin and Referer are test inputs (CORS/CSRF): the server uses them to decide what to answer, not
+ * where to connect, so they belong in TEST_ONLY_HEADERS below and never reach this rule.
+ */
+const HEADER_HOST = /(?:^|[\s,;])(?:host|x-forwarded-host|x-forwarded-server|x-forwarded-for|forwarded)\s*:\s*([^\s,;]+)/gi;
+/** Headers a test may set to an arbitrary value without turning into SSRF. Documented in docs/gate.md. */
+const TEST_ONLY_HEADERS = new Set(["origin", "referer"]);
+const HEADER_LINE = /^([A-Za-z][A-Za-z0-9-]*)\s*:\s*(.*)$/;
+const SCHEME_URL = /^[a-z][a-z0-9+.-]*:\/\//i;
+
+/**
+ * S81/task 1: the general argv scan only treats a token as a host when it has host shape. The header
+ * path used to skip that guard, so `Origin: null` became the host "null" and the run was denied for
+ * an out-of-scope host that nobody was going to connect to.
+ */
+function looksLikeConnectionHost(value: string): boolean {
+	const trimmed = value.trim().replace(/^["']|["']$/g, "");
+	if (trimmed.length === 0) return false;
+	if (SCHEME_URL.test(trimmed)) return true;
+	const withoutPort = trimmed.replace(/:\d+$/, "");
+	if (withoutPort.startsWith("[") && withoutPort.endsWith("]")) return true;
+	if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(withoutPort)) return true;
+	if (withoutPort.toLowerCase() === "localhost") return true;
+	return /^[A-Za-z0-9._-]+$/.test(withoutPort) && withoutPort.includes(".");
+}
 const BARE_HOST = /^[A-Za-z0-9._:*[\]-]+$/;
 const MAX_DNS_DEPTH = 6;
 
@@ -186,12 +211,18 @@ async function collectFromArgv(
 		if (equals >= 0) values.push(token.slice(equals + 1));
 
 		for (const value of values) {
+			// A test-only header is never a connection destination, not even when its value is a URL.
+			const headerLine = HEADER_LINE.exec(value);
+			if (headerLine !== null && TEST_ONLY_HEADERS.has(headerLine[1]!.toLowerCase())) {
+				skipped.push(`${headerLine[1]}: ${headerLine[2]}`);
+				continue;
+			}
 			for (const match of value.matchAll(URL_IN_TEXT)) {
 				push(match[0], "argv");
 			}
 			for (const match of value.matchAll(HEADER_HOST)) {
 				const headerHost = match[1];
-				if (!headerHost) continue;
+				if (headerHost === undefined || !looksLikeConnectionHost(headerHost)) continue;
 				push(headerHost, "header-host");
 			}
 		}

@@ -1913,3 +1913,21 @@ Ninguna ruta dependió de `lab: true`.
 Punto 4: el esquema de `scope.yaml` quedó intacto.
 
 Estado: **331 tests, 0 fallos**.
+
+### L31 — S81: headers de prueba, mutaciones GraphQL y el nombre de F-0002
+
+1. **Gate y headers**: `header-host` no aplicaba la guarda de forma de host que sí aplica el escaneo
+   general, así que `Origin: null` se convertía en el host `null`. Igualado: un valor de header solo es
+   destino si parsea como host/URL/IP. Y lista cerrada de headers de prueba (`Origin`, `Referer`) que no
+   se validan porque el servidor los usa para decidir qué devuelve, no a dónde conecta; `Host`,
+   `X-Forwarded-Host`, `X-Forwarded-Server`, `X-Forwarded-For` y `Forwarded` siguen validándose.
+   Documentado en `docs/gate.md`. Tests: `gate.headers` (6).
+2. **Mutaciones GraphQL**: `graphqlMutation()` detecta `mutation` en el cuerpo (JSON o GraphQL crudo,
+   fuera de comentarios) y clasifica `graphql-mutation` como destructiva: siempre pausa. Endpoint
+   `/graphql` benigno en el lab (append en memoria). Tests: `destructive-graphql` (4). Limitación
+   documentada: no se detectan por nombre las mutaciones financieras ni los REST que mutan.
+3. **F-0002**: `findings.update` no aceptaba `title`; se agregó (renombrar no es evidencia ni cambio de
+   estado). F-0002 quedó como `candidate` con el título honesto (posible exposición de
+   `ShopUser.playerId`, sin confirmar). No se consultó la página de ATG: cero tráfico a hosts reales.
+
+Estado: suite completa en verde (ver el informe del checkpoint).

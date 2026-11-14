@@ -97,3 +97,13 @@ test("an unknown finding is reported as missing, not invented", () =>
 		assert.equal(await store.get("F-9999"), null);
 		await assert.rejects(() => store.update("F-9999", { state: "verified" }, "x"), /unknown finding F-9999/);
 	}));
+
+test("S81: renaming a finding keeps its state and adds no transition", () =>
+	withStore(async (store) => {
+		const { finding } = await store.create(base);
+		const renamed = await store.update(finding.id, { title: "candidato: posible exposición de playerId, sin confirmar" }, "renombrado");
+		assert.equal(renamed.title, "candidato: posible exposición de playerId, sin confirmar");
+		assert.equal(renamed.state, "candidate");
+		assert.equal(renamed.transitions.length, finding.transitions.length);
+		assert.equal(renamed.fingerprint, finding.fingerprint, "renaming must not change identity");
+	}));

@@ -63,7 +63,16 @@ export interface FindingsStore {
 	}): Promise<{ finding: Finding; duplicateOf: string | null }>;
 	update(
 		id: string,
-		patch: { state?: FindingState; confidence?: Confidence; cvss?: string; score?: number; sensitive?: boolean; notes?: string[] },
+		patch: {
+			state?: FindingState;
+			/** S81/task 3: renaming corrects the wording; it is neither evidence nor a state change. */
+			title?: string;
+			confidence?: Confidence;
+			cvss?: string;
+			score?: number;
+			sensitive?: boolean;
+			notes?: string[];
+		},
 		reason: string,
 	): Promise<Finding>;
 	get(id: string): Promise<Finding | null>;
@@ -155,6 +164,7 @@ export function createFindingsStore(options: { dir: string; program: string; now
 				finding.transitions.push({ at: ts, from: finding.state, to: patch.state, reason });
 				finding.state = patch.state;
 			}
+			if (patch.title !== undefined && patch.title.trim().length > 0) finding.title = patch.title.trim();
 			if (patch.confidence) finding.confidence = patch.confidence;
 			if (patch.cvss !== undefined) finding.cvss = patch.cvss;
 			if (patch.score !== undefined) finding.score = patch.score;
