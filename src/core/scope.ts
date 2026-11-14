@@ -43,6 +43,15 @@ export interface AutomationPolicy {
 	automatedScanning: "allowed" | "forbidden" | "unknown";
 }
 
+/**
+ * S79/S82: a required program header, and how it has to match. Plain string = exact (the historical
+ * form). "contains" exists because programs like Bugcrowd require a token *inside* the User-Agent.
+ */
+export interface RequiredHeader {
+	value: string;
+	mode: "exact" | "contains";
+}
+
 export interface ScopePolicy {
 	program: string;
 	/** S47: true only for a lab the operator owns. Gates the confirmation test stub. */
@@ -52,7 +61,7 @@ export interface ScopePolicy {
 	inScope: ScopeRule[];
 	outOfScope: ScopeRule[];
 	limits: ScopeLimits;
-	requiredHeaders: Record<string, string>;
+	requiredHeaders: Record<string, RequiredHeader>;
 	automation: AutomationPolicy;
 	notes: string | null;
 }
@@ -338,6 +347,41 @@ function asMap(node: Node | undefined, key: string, errors: string[]): Record<st
 	return out;
 }
 
+/** S79: `Name: value` keeps the old meaning (exact); `Name: {value, mode}` adds "contains". */
+function asRequiredHeaders(node: Node | undefined, errors: string[]): Record<string, RequiredHeader> {
+	if (node === undefined) return {};
+	if (typeof node === "string" || Array.isArray(node)) {
+		errors.push("required_headers must be a map of name: value");
+		return {};
+	}
+	const out: Record<string, RequiredHeader> = {};
+	for (const [name, value] of Object.entries(node)) {
+		if (typeof value === "string") {
+			out[name] = { value, mode: "exact" };
+			continue;
+		}
+		if (Array.isArray(value)) {
+			errors.push(`required_headers.${name} must be a value or a map with value and mode`);
+			continue;
+		}
+		for (const key of Object.keys(value)) {
+			if (key !== "value" && key !== "mode") errors.push(`unknown key ${JSON.stringify(key)} in required_headers.${name}`);
+		}
+		const inner = value.value;
+		const mode = value.mode ?? "exact";
+		if (typeof inner !== "string" || inner.trim().length === 0) {
+			errors.push(`required_headers.${name}.value must be a non-empty string`);
+			continue;
+		}
+		if (mode !== "exact" && mode !== "contains") {
+			errors.push(`required_headers.${name}.mode must be "exact" or "contains"`);
+			continue;
+		}
+		out[name] = { value: inner, mode };
+	}
+	return out;
+}
+
 function rejectUnknownKeys(node: { [key: string]: Node }, allowed: Set<string>, section: string, errors: string[]): void {
 	for (const key of Object.keys(node)) {
 		if (!allowed.has(key)) errors.push(`unknown key ${JSON.stringify(key)}${section === "" ? "" : ` in ${section}`}`);
@@ -427,7 +471,7 @@ export function parseScope(text: string): ScopeParseResult {
 		}
 	}
 
-	const requiredHeaders = asMap(doc.required_headers, "required_headers", errors) ?? {};
+	const requiredHeaders = asRequiredHeaders(doc.required_headers, errors);
 	// S47: mandatory and strict. Without it the scope does not load, same fail-closed rule as the rest.
 	const labText = asString(doc.lab, "lab", errors);
 	let lab: boolean | null = null;

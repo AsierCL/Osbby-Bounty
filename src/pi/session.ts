@@ -155,6 +155,26 @@ export function confirmQuestion(
 	].join("\n");
 }
 
+/** S79: `-H "Name: value"` / `--header=Name: value` in argv, as the request headers. */
+export function headersFromArgs(args: string[]): Record<string, string> {
+	const out: Record<string, string> = {};
+	for (let index = 0; index < args.length; index += 1) {
+		const token = args[index] as string;
+		let raw: string | undefined;
+		if (token === "-H" || token === "--header") raw = args[index + 1];
+		else if (token.startsWith("--header=")) raw = token.slice("--header=".length);
+		else if (token.startsWith("-H") && token.length > 2) raw = token.slice(2);
+		if (raw === undefined) continue;
+		const separator = raw.indexOf(":");
+		if (separator <= 0) continue;
+		const name = raw.slice(0, separator).trim().toLowerCase();
+		const value = raw.slice(separator + 1).trim();
+		if (name.length === 0) continue;
+		out[name] = out[name] === undefined ? value : `${out[name]}, ${value}`;
+	}
+	return out;
+}
+
 export function createSession(config: ProgramConfig, deps: SessionDeps): ProgramSession {
 	const now = config.now ?? (() => Date.now());
 	const workspace = join(config.root, "work", config.program);
@@ -369,7 +389,9 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				method: input.method,
 				technique: input.technique,
 				followRedirects: input.followRedirects,
-				headers: current.requiredHeaders,
+				// S79/S82: the gate checks the required headers against what the tool will send, not
+				// against the requirement itself.
+				headers: headersFromArgs(args),
 			};
 
 			// S63: the scope on disk must be the one a human confirmed. Edited scope => denied.

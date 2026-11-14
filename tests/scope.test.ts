@@ -70,7 +70,7 @@ test("a well-formed scope parses every field", () => {
 	assert.deepEqual(p.limits.forbidden, ["dos", "brute-force"]);
 	assert.deepEqual(p.limits.allowedMethods, ["GET", "POST"]);
 	assert.equal(p.limits.redirects, "reject");
-	assert.deepEqual(p.requiredHeaders, { "X-Bounty-Id": "abc-123" });
+	assert.deepEqual(p.requiredHeaders, { "X-Bounty-Id": { value: "abc-123", mode: "exact" } });
 	assert.equal(p.automation.aiAssistedReports, "allowed");
 	assert.equal(p.automation.automatedScanning, "unknown");
 });

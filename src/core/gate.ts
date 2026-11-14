@@ -97,6 +97,8 @@ const URL_IN_TEXT = /[a-z][a-z0-9+.-]*:\/\/[^\s"'<>,)]+/gi;
 const HEADER_HOST = /(?:^|[\s,;])(?:host|x-forwarded-host|x-forwarded-server|x-forwarded-for|forwarded)\s*:\s*([^\s,;]+)/gi;
 /** Headers a test may set to an arbitrary value without turning into SSRF. Documented in docs/gate.md. */
 const TEST_ONLY_HEADERS = new Set(["origin", "referer"]);
+/** Headers that can decide where the connection goes: their values are still read as destinations. */
+const ROUTING_HEADERS = new Set(["host", "x-forwarded-host", "x-forwarded-server", "x-forwarded-for", "forwarded"]);
 const HEADER_LINE = /^([A-Za-z][A-Za-z0-9-]*)\s*:\s*(.*)$/;
 const SCHEME_URL = /^[a-z][a-z0-9+.-]*:\/\//i;
 
@@ -221,10 +223,20 @@ async function collectFromArgv(
 				push(match[0], "argv");
 			}
 			for (const match of value.matchAll(HEADER_HOST)) {
-				const headerHost = match[1];
-				if (headerHost === undefined || !looksLikeConnectionHost(headerHost)) continue;
+				// `Forwarded: for=otro.com` carries the host inside a parameter.
+				const headerHost = (match[1] ?? "").replace(/^(?:for|host|by|proto)=/i, "").replace(/^"|"$/g, "");
+				if (headerHost.length === 0 || !looksLikeConnectionHost(headerHost)) continue;
 				push(headerHost, "header-host");
 			}
+		}
+
+		// S82: inside a non-routing header line the part after "=" is a header value, not a bare host.
+		// A cookie like `session=abc.def` used to become the host `abc.def` and block the run. Routing
+		// headers are excluded: their values are still destinations.
+		const headerName = HEADER_LINE.exec(token)?.[1]?.toLowerCase();
+		if (headerName !== undefined && !ROUTING_HEADERS.has(headerName)) {
+			URL_IN_TEXT.lastIndex = 0;
+			continue;
 		}
 
 		// A bare token that looks like a hostname must be in scope; refusing to guess is the point.
@@ -267,10 +279,17 @@ export async function gate(policy: ScopePolicy, request: GateRequest, deps: Gate
 		notes.push("each redirect hop must be re-gated before following it");
 	}
 
-	// 4. required program headers
-	for (const name of Object.keys(policy.requiredHeaders)) {
-		if (headerValue(request.headers, name) === null) {
-			return { allowed: false, reason: `required header ${name} is missing` };
+	// 4. required program headers, checked against the headers the request actually sends (S79/S82).
+	for (const [name, required] of Object.entries(policy.requiredHeaders)) {
+		const actual = headerValue(request.headers, name);
+		if (actual === null) return { allowed: false, reason: `required header ${name} is missing` };
+		const satisfied =
+			required.mode === "contains"
+				? actual.toLowerCase().includes(required.value.toLowerCase())
+				: actual.trim() === required.value;
+		if (!satisfied) {
+			const expectation = required.mode === "contains" ? `must contain ${JSON.stringify(required.value)}` : `must be ${JSON.stringify(required.value)}`;
+			return { allowed: false, reason: `required header ${name} ${expectation}`, detail: `sent: ${JSON.stringify(actual)}` };
 		}
 	}
 

@@ -1931,3 +1931,26 @@ Estado: **331 tests, 0 fallos**.
    `ShopUser.playerId`, sin confirmar). No se consultó la página de ATG: cero tráfico a hosts reales.
 
 Estado: suite completa en verde (ver el informe del checkpoint).
+
+### L32 — S82: required_headers con modos, cookies de sesión y el guardarraíl de credencial compartida
+
+**S79 no estaba hecho.** `required_headers` era `Record<string, string>`: solo coincidencia exacta, y en
+la sesión la comprobación era **vacua** (se pasaba el requisito como si fueran los headers de la
+petición, así que nunca fallaba). Terminado ahora:
+
+- `scope.ts`: `RequiredHeader { value, mode: "exact" | "contains" }`. Un string mantiene el significado
+  histórico (exacto); la forma `{value, mode}` acepta "contains" (Bugcrowd pide "bugcrowd" dentro del
+  User-Agent). Un modo desconocido es error de carga.
+- `gate.ts`: la comparación es contra los headers que la petición envía, con el modo declarado.
+- `session.ts`: `headersFromArgs()` extrae `-H`/`--header`/`--header=` y eso es lo que ve el gate.
+- Tests: `required-headers` (6), incluido el flujo real: sin el header ⇒ no ejecuta; con el UA de
+  Bugcrowd ⇒ pasa.
+
+**Cookies de sesión (punto 4)**: `bounty_run` ya acepta `-H "Cookie: …"`, pero había fricción real: un
+valor con `=` y un punto (`session=abc.def`) se leía como el host `abc.def` y la corrida se denegaba.
+Arreglado: dentro de una línea de header, el valor después de `=` no es un host desnudo; una URL con
+esquema en cualquier header sigue bloqueando.
+
+**thefork**: no se cargó ningún scope. Guardarraíl de protocolo agregado: con credencial compartida
+entre investigadores, no se cambia el identificador de un recurso por otro distinto del provisto sin
+confirmación explícita del humano.

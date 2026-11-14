@@ -77,6 +77,8 @@ limits:
 # ─── Cabeceras obligatorias ─────────────────────────────────────────────────────
 
 # Si el programa te pide identificarte en cada request, va acá y el gate exige que estén presentes.
+# Un valor simple exige coincidencia exacta; `{value, mode: contains}` exige que el valor contenga el
+# texto (por ejemplo, Bugcrowd pide "bugcrowd" dentro del User-Agent).
 required_headers:
   # X-Bounty-Id: "acme-2026-1234"
 

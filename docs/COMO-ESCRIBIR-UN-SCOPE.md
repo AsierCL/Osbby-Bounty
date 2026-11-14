@@ -16,7 +16,8 @@ literal:
 | solo `api.acme.com:8443` | `api.acme.com:8443` (puerto incluido) |
 | 5 req/s | `limits.rate_rps: 5` |
 | "no DoS ni fuerza bruta" | `limits.forbidden: [dos, brute-force]` |
-| header obligatorio | `required_headers: { X-Bounty-Id: "..." }` |
+| header obligatorio (exacto) | `required_headers: { X-Bounty-Id: "...-..." }` |
+| header obligatorio (contiene) | `required_headers: { User-Agent: { value: "bugcrowd", mode: "contains" } }` |
 | "no a escaneo automatizado" | `automation.automated_scanning: forbidden` |
 
 **No agregues nada que el programa no diga.** Ni un dominio "por si acaso", ni un puerto extra.

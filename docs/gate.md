@@ -11,7 +11,11 @@ Una acción se deniega en el primer chequeo que falla. No hay "warn and continue
 2. **Técnica** prohibida (`limits.forbidden`), por ejemplo `dos` o `brute-force`.
 3. **Redirects**: si se piden y la política es `reject`, se deniega. Con `revalidate`, se permite y
    se emite la nota de que **cada salto debe re-validarse**.
-4. **Headers obligatorios** del programa (`required_headers`): si falta uno, se deniega.
+4. **Headers obligatorios** del programa (`required_headers`): se comparan contra los headers que la
+   petición **envía de verdad** (`-H`/`--header`). Un valor simple exige coincidencia exacta; la forma
+   `{value, mode: contains}` exige que el valor contenga el texto (Bugcrowd pide "bugcrowd" dentro del
+   User-Agent). Antes de S79/S82 la comprobación era vacua: la sesión pasaba el requisito como si fuera
+   la petición, así que nunca podía fallar.
 5. **Rate declarado**: si el scope no declara `rate_rps`, se deniega todo. Un presupuesto que no
    existe no se puede respetar.
 6. **Alcance de cada host contactado**: target, URLs del argv, hosts sueltos del argv, archivos de
@@ -78,6 +82,11 @@ escaneo genérico de argv: la excepción es una lista cerrada de dos nombres, no
 
 Los headers de prueba quedan anotados como omitidos en el resultado del gate, para que la evidencia
 muestre por qué no se validaron.
+
+Dentro de una línea de header (`Nombre: valor`) el texto que sigue a un `=` es **valor de header**, no
+un host desnudo: una cookie como `session=abc.def` se leía como el host `abc.def` y bloqueaba la
+corrida. Una URL con esquema dentro de cualquier header sigue bloqueando, porque la encuentra el escaneo
+genérico.
 
 ## Mutaciones GraphQL: siempre pausan (S81)
 

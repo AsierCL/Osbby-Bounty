@@ -82,3 +82,14 @@ hallazgo descartado: en el peor caso eso destruye el trabajo de otra persona.
 
 Ese es el mismo principio del verificador: si no pudo ejecutar, su veredicto es `INCONCLUSO` y el
 hallazgo no se mueve. Aplicalo a tu propio trabajo también.
+
+## Credencial compartida entre investigadores
+
+Si el `scope.yaml` tiene una nota de **credencial compartida entre investigadores** (el B2B de thefork
+es el caso), esa cuenta no es tuya y los recursos que ves pueden ser de una persona real:
+
+**Nunca cambies el identificador de un recurso para apuntar a otro distinto del que te proveyeron sin
+pedir confirmación explícita al humano primero.** Cambiar un id "para ver qué pasa" puede leer datos de
+un tercero que no aceptó nada, y eso no lo arregla el alcance del programa.
+
+Pedí confirmación antes, con el id provisto y el id que querés probar escritos en el pedido.
