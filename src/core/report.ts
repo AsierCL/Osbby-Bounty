@@ -36,6 +36,11 @@ export interface ReportInput {
 	initialSeq: number | null;
 	/** (b) contradictions the validator must surface without rejecting the report. */
 	warnings?: string[];
+	/**
+	 * S78/task 1: the report a platform receives ("external") does not presuppose access to the evidence
+	 * chain: no seq numbers, no hashes, no "not documented" section. The internal copy keeps them.
+	 */
+	audience?: "internal" | "external";
 }
 
 export interface ReportValidation {
@@ -207,6 +212,18 @@ export function validateReportText(input: {
 	return { ok: errors.length === 0, errors, warnings };
 }
 
+/**
+ * S78/task 1: the external copy cannot presuppose the evidence chain, so prose that cites seqs loses
+ * those parentheticals. Mechanical on purpose: the reporter is also told not to cite them.
+ */
+export function stripChainReferences(text: string, enabled: boolean): string {
+	if (!enabled || text.length === 0) return text;
+	let out = text.replace(/\([^)]*\bseq\s*\d+[^)]*\)/gi, "");
+	out = out.replace(/\([^)]*\b(?:verificaci[óo]n|evidencia)\b[^)]*\)/gi, "");
+	out = out.replace(/\s+([.,;:])/g, "$1").replace(/\s{2,}/g, " ").trim();
+	return out;
+}
+
 /** (d): masks secrets and third-party personal data. Only the written report goes through this. */
 export function redactExtract(text: string, enabled: boolean): string {
 	if (!enabled || text.length === 0) return text;
@@ -355,7 +372,8 @@ export function renderReport(input: ReportInput): string {
 	const conditions = deriveConditions(vector, lang);
 	const evidence = extractEvidence(input.records, { reproSeqs: input.reproSeqs, initialSeq: input.initialSeq, redact: input.redact, lang });
 	// S76/task 5: redaction covers every text of the report, the reporter's prose included.
-	const mask = (value: string): string => redactExtract(value, input.redact);
+	const external = input.audience === "external";
+	const mask = (value: string): string => stripChainReferences(redactExtract(value, input.redact), external);
 	const lines: string[] = [];
 	lines.push(`# ${mask(finding.title)}`, "");
 	lines.push(`**${labels.severity}:** ${severity}`);
@@ -378,29 +396,38 @@ export function renderReport(input: ReportInput): string {
 	lines.push("");
 
 	lines.push(`## ${labels.steps}`, "");
-	input.steps.forEach((step, index) => lines.push(`${index + 1}. ${mask(step)}`));
+	for (const [index, step] of input.steps.entries()) {
+		// The prose sometimes numbers itself; the template is the only source of the number.
+		const cleaned = step.replace(/^\s*(?:\d+[.)]|[-*•])\s+/, "").replace(/^\s+/, "");
+		lines.push(`${index + 1}. ${mask(cleaned)}`);
+	}
 	if (input.steps.length === 0) lines.push(`_${LABELS[lang].none}_`);
 	lines.push("");
 
 	lines.push(`## ${labels.evidence}`, "");
 	if (evidence.initial !== null) {
-		lines.push(`### ${labels.initial} (seq ${evidence.initial.seq})`, "");
-		lines.push(...evidenceLines(evidence.initial, labels));
+		lines.push(external ? `### ${labels.initial}` : `### ${labels.initial} (seq ${evidence.initial.seq})`, "");
+		lines.push(...evidenceLines(evidence.initial, labels, external));
 		lines.push("");
 	}
 	if (evidence.reproduction.length > 0) {
 		const verdictSeq = [...input.records].reverse().find((record) => record.kind === "verification")?.seq;
-		lines.push(`### ${labels.reproduction}${verdictSeq === undefined ? "" : lang === "es" ? ` (veredicto en seq ${verdictSeq})` : ` (verdict at seq ${verdictSeq})`}`, "");
+		const verdictNote =
+			external || verdictSeq === undefined ? "" : lang === "es" ? ` (veredicto en seq ${verdictSeq})` : ` (verdict at seq ${verdictSeq})`;
+		lines.push(`### ${labels.reproduction}${verdictNote}`, "");
 		for (const [index, item] of evidence.reproduction.entries()) {
-			lines.push(`**seq ${item.seq}** — ${item.signed ? labels.signed : labels.unsigned}`, "");
-			lines.push(...evidenceLines(item, labels));
-			if (input.steps.length > 0) {
-				lines.push(`- ${labels.expected}: ${mask(input.steps[index] ?? "—")}`);
-			}
+			lines.push(
+				external
+					? `**${lang === "es" ? "Reproducción" : "Reproduction"} ${index + 1}**`
+					: `**seq ${item.seq}** — ${item.signed ? labels.signed : labels.unsigned}`,
+				"",
+			);
+			lines.push(...evidenceLines(item, labels, external));
+			lines.push(`- ${labels.expected}: ${expectedFor(item, evidence.reproduction[0], lang)}`);
 			lines.push("");
 		}
 	}
-	if (evidence.omitted.length > 0) {
+	if (!external && evidence.omitted.length > 0) {
 		lines.push(`### ${labels.omitted}`, "");
 		for (const item of evidence.omitted) lines.push(`- seq ${item.seq} · ${item.kind} — ${lang === "es" ? "no citado por el reporte" : "not cited by this report"}`);
 		lines.push("");
@@ -411,9 +438,20 @@ export function renderReport(input: ReportInput): string {
 	return lines.join("\n");
 }
 
-function evidenceLines(item: Extracted, labels: (typeof LABELS)[ReportLang]): string[] {
+/** S78/task 1: the expected outcome is compared with the first reproduction, in one short line. */
+function expectedFor(item: Extracted, first: Extracted | undefined, lang: ReportLang): string {
+	const status = item.status === null ? (lang === "es" ? "sin estado" : "no status") : `${item.status} OK`;
+	if (first === undefined || first.seq === item.seq) {
+		return lang === "es" ? `${status}, respuesta completa` : `${status}, complete response`;
+	}
+	const sameBody = item.body !== null && first.body !== null && item.body === first.body;
+	if (sameBody) return lang === "es" ? `${status}, cuerpo idéntico a la reproducción 1` : `${status}, body identical to reproduction 1`;
+	return lang === "es" ? `${status}, cuerpo distinto de la reproducción 1` : `${status}, body differs from reproduction 1`;
+}
+
+function evidenceLines(item: Extracted, labels: (typeof LABELS)[ReportLang], external: boolean): string[] {
 	const out: string[] = [];
-	out.push(`- sha256 ${item.hash.slice(0, 16)}… · ${item.ts}`);
+	if (!external) out.push(`- sha256 ${item.hash.slice(0, 16)}… · ${item.ts}`);
 	if (item.method !== null && item.url !== null) out.push(`- ${item.method} ${item.url}`);
 	if (item.headers.length > 0) out.push(`- ${labels.observed} headers: ${item.headers.join(" · ")}`);
 	out.push(`- ${labels.status}: ${item.status ?? "—"}`);
@@ -423,7 +461,11 @@ function evidenceLines(item: Extracted, labels: (typeof LABELS)[ReportLang]): st
 }
 
 /** Checklist: what a platform would reject the report for. */
-export function validateReport(markdown: string, lang: ReportLang = "es"): { ok: boolean; missing: string[] } {
+export function validateReport(
+	markdown: string,
+	lang: ReportLang = "es",
+	audience: "internal" | "external" = "internal",
+): { ok: boolean; missing: string[] } {
 	const labels = LABELS[lang];
 	const sections = [labels.summary, labels.conditions, labels.steps, labels.evidence, labels.impact, labels.remediation];
 	const missing = sections.filter((section) => !markdown.includes(`## ${section}`));
@@ -431,6 +473,9 @@ export function validateReport(markdown: string, lang: ReportLang = "es"): { ok:
 		{ label: "vector CVSS", test: /CVSS:4\.0\// },
 		{ label: "evidencia con hash", test: /sha256 [0-9a-f]{16}/ },
 		{ label: "pasos numerados", test: /^1\. /m },
-	].filter((item) => !item.test.test(markdown)).map((item) => item.label);
+	]
+		.filter((item) => !(audience === "external" && item.label === "evidencia con hash"))
+		.filter((item) => !item.test.test(markdown))
+		.map((item) => item.label);
 	return { ok: missing.length === 0 && specifics.length === 0, missing: [...missing, ...specifics] };
 }

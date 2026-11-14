@@ -230,8 +230,9 @@ test("the positive path: two reproductions, a verified finding and a report that
 			remediation: "Verificar propiedad del recurso.",
 		});
 		assert.equal(report.ok, true, report.text);
-		const markdown = await readFile(join(h.dir, "work", "lab", "reports", `${id}.md`), "utf8");
-		const check = validateReport(markdown, "en");
+		// S78: the chain-carrying copy is the internal one; the report/ copy is the external one.
+		const markdown = await readFile(join(h.dir, "work", "lab", "evidence", `${id}.report-internal.md`), "utf8");
+		const check = validateReport(markdown, "en", "internal");
 		assert.equal(check.ok, true, `report missing: ${check.missing.join(", ")}`);
 		assert.match(markdown, /CVSS:4\.0\//);
 		assert.match(markdown, /sha256 [0-9a-f]{16}/);

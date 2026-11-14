@@ -45,10 +45,20 @@ const task = [
 	"- impact: coherente con el vector; PR:N significa que NO hace falta autenticarse.",
 	"- remediation: concreta, una o dos frases.",
 	"- Escribí en español.",
+	"- No menciones números de seq, hashes ni la cadena de evidencia: el reporte va a una plataforma. Decí \"reproducción 1\" y \"reproducción 2\".",
 	`Datos: hallazgo ${findingId}, endpoint ${finding.endpoint}${finding.parameter === null ? "" : ` (parámetro ${finding.parameter})`}, título ${JSON.stringify(finding.title)}.`,
 	`Vector: ${vector}.`,
 	`Podés leer la cadena de evidencia en ${join(root, "work", program, "evidence", "log.jsonl")} (registros execution y execution-result, con seq).`,
 ].join("\n");
+
+// S78: with a saved prose file there is no model call at all.
+const prosePath = join(root, "work", program, "reports", `${findingId}.prose.json`);
+const saved = await readFile(prosePath, "utf8").then((text) => text, () => null);
+if (saved !== null) {
+	const cached = extractProse(saved);
+	await writeReport(cached.value as Record<string, unknown>);
+	process.exit(0);
+}
 
 const runner = createPiRunner({ piCommand: ["pi"], extensionEntry: join(root, "extensions", "bounty.ts"), defaultTimeoutMs: 10 * 60 * 1000 });
 const started = Date.now();
@@ -71,18 +81,23 @@ const prose = extracted.value as Record<string, unknown>;
 await mkdir(join(root, "work", program, "reports"), { recursive: true });
 await writeFile(join(root, "work", program, "reports", `${findingId}.prose.json`), JSON.stringify(prose, null, "\t") + "\n", "utf8");
 
-const report = await session.report({
-	findingId,
-	metrics: { AV: "N", AC: "L", AT: "N", PR: "N", UI: "N", VC: "H", VI: "N", VA: "N", SC: "N", SI: "N", SA: "N" },
-	summary: String(prose.summary ?? ""),
-	steps: Array.isArray(prose.steps) ? prose.steps.map(String) : [],
-	impact: String(prose.impact ?? ""),
-	remediation: String(prose.remediation ?? ""),
-	...(typeof prose.cwe === "string" ? { cwe: prose.cwe } : {}),
-	...(typeof prose.sensitive_data === "string" ? { sensitiveData: prose.sensitive_data } : {}),
-});
-console.log(`reporte: ${report.ok ? "escrito" : "rechazado"} — ${report.text.split("\n")[0]}`);
-if (!report.ok) process.exit(1);
-console.log("\n--- REPORTE ---\n");
-console.log(await readFile(join(root, "work", program, "reports", `${findingId}.md`), "utf8"));
-console.log(`\n(base: ${base})`);
+await writeReport(prose as Record<string, unknown>);
+
+async function writeReport(input: Record<string, unknown>): Promise<void> {
+	const report = await session.report({
+		findingId,
+		metrics: { AV: "N", AC: "L", AT: "N", PR: "N", UI: "N", VC: "H", VI: "N", VA: "N", SC: "N", SI: "N", SA: "N" },
+		summary: String(input.summary ?? ""),
+		steps: Array.isArray(input.steps) ? input.steps.map(String) : [],
+		impact: String(input.impact ?? ""),
+		remediation: String(input.remediation ?? ""),
+		...(typeof input.cwe === "string" ? { cwe: input.cwe } : {}),
+		...(typeof input.sensitive_data === "string" ? { sensitiveData: input.sensitive_data } : {}),
+	});
+	console.log(`reporte: ${report.ok ? "escrito" : "rechazado"} — ${report.text.split("\n")[0]}`);
+	if (!report.ok) process.exit(1);
+	console.log("\n--- REPORTE EXTERNO ---\n");
+	console.log(await readFile(join(root, "work", program, "reports", `${findingId}.md`), "utf8"));
+	console.log(`\n(copia interna con seqs y hashes: work/${program}/evidence/${findingId}.report-internal.md)`);
+	console.log(`(base: ${base})`);
+}

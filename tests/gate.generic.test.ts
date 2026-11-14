@@ -102,3 +102,23 @@ test("a local path value of a known file flag is not treated as a host", async (
 	);
 	assert.equal(result.allowed, true, JSON.stringify(result));
 });
+
+test("S78: a second host anywhere in argv is validated, not just the one in the expected slot", async () => {
+	// curl accepts several URLs positionally and fetches them all; the gate must not assume the
+	// last argument is the target. Here the out-of-scope host comes first.
+	const result = await gate(
+		policy(),
+		{ target: "https://a.acme.com/", headers: {}, argv: ["-sS", "-i", "https://otro.com/x", "https://a.acme.com/"] } as never,
+		deps,
+	);
+	assert.equal(result.allowed, false, JSON.stringify(result));
+	if (!result.allowed) assert.match(result.detail ?? "", /otro\.com/);
+
+	// And in the middle, with a flag after it.
+	const middle = await gate(
+		policy(),
+		{ target: "https://a.acme.com/", headers: {}, argv: ["-sS", "https://a.acme.com/", "https://otro.com/y", "--max-time", "5"] } as never,
+		deps,
+	);
+	assert.equal(middle.allowed, false, JSON.stringify(middle));
+});

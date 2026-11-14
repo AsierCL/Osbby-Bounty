@@ -1883,3 +1883,33 @@ Decisiones del operador: A aprobada; B aprobada y ampliada a tres veredictos.
    humana del reporte.
 
 Estado: **325 tests, 0 fallos**.
+
+### L30 — S78: formato del reporte, argv duplicado y ensayo lab:false
+
+Revisión del operador sobre el reporte de R14: numeración doble en los pasos, "Sin documentar" que no va
+en la copia externa, y "Esperado" que repetía el párrafo. Las tres corregidas:
+
+- La plantilla numera; la prosa del modelo se limpia de su propia numeración. El reportero además
+  recibe la regla de no numerar ni citar seqs.
+- `renderReport` tiene audiencia: `externo` (el de `reports/`, sin seq, sin hashes, sin "Sin documentar",
+  sin paréntesis que citen la cadena) e `interno` (`evidence/<id>.report-internal.md`, con todo). Las
+  dos pasan su checklist.
+- "Esperado" se calcula por código comparando con la primera reproducción: "200 OK, cuerpo idéntico a
+  la reproducción 1".
+
+Punto 2 (respuesta precisa): curl acepta **varias URLs posicionales y las pide todas**; su código de
+salida es el del **último** transfer (basura-primero → exit 0 con "Could not resolve host: curl";
+buena-primero → exit 6). El gate valida **cada** token con forma de host/URL/IP en **cualquier**
+posición (`URL_IN_TEXT` sobre cada token, `header-host`, host desnudo); "curl" no tiene punto, no es
+host, y queda anotado en `skipped`. No era un agujero de scope: el defecto era que `args` incluyera el
+nombre de la tool. Ahora `session.run` lo descarta si es el primer argumento, y el gate, la ejecución y
+el registro ven la misma lista. Tests: `gate.generic` (segundo host en cualquier posición) y
+`args-normalization`.
+
+Punto 3: ensayo `lab: false` completo en `docs/evidence/s78-lab-false-trial.md`: preflight OK con
+avisos, stub rechazado en voz alta, alcance no cargado, hijo real (29 s) que no ejecutó, cero evidencia.
+Ninguna ruta dependió de `lab: true`.
+
+Punto 4: el esquema de `scope.yaml` quedó intacto.
+
+Estado: **331 tests, 0 fallos**.

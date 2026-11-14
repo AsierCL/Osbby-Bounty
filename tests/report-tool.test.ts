@@ -54,7 +54,9 @@ test("a verified finding produces a report with the score computed from the metr
 		const expected = scoreVector("CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N");
 		assert.ok(!("ok" in expected));
 		if (!("ok" in expected)) assert.match(result.text, new RegExp(`Severidad calculada: ${expected.score.toFixed(1)}`));
-		const report = await readFile(join(h.dir, "work", "lab", "reports", `${h.id}.md`), "utf8");
+		const report = await readFile(join(h.dir, "work", "lab", "evidence", `${h.id}.report-internal.md`), "utf8");
+		const external = await readFile(join(h.dir, "work", "lab", "reports", `${h.id}.md`), "utf8");
+		assert.doesNotMatch(external, /sha256|\bseq \d/, "the external copy must not presuppose the chain");
 		assert.match(report, /CVSS:4\.0\/AV:N/);
 		assert.match(report, /sha256 [0-9a-f]{16}/);
 		assert.match(report, /^1\. GET/m);

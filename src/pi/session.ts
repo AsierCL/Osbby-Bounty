@@ -358,10 +358,14 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			} catch (error) {
 				return { ok: false, text: (error as Error).message };
 			}
-			const argv = [input.tool, ...input.args];
+			// S78/task 2: `args` is what the tool receives, never the tool name. A model that repeats the
+			// tool inside args once produced `curl curl …`, and curl fetched both positionally: the gate
+			// validated both (it validates every host-shaped token), but the recorded argv lied.
+			const args = input.args[0] === input.tool ? input.args.slice(1) : input.args;
+			const argv = [input.tool, ...args];
 			const request: GateRequest = {
 				target: input.target,
-				argv: input.args,
+				argv: args,
 				method: input.method,
 				technique: input.technique,
 				followRedirects: input.followRedirects,
@@ -728,7 +732,7 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			const textCheck = validateReportText({ title: finding.title, summary, impact: input.impact ?? "", vector, lang: reportLang });
 			if (!textCheck.ok) return { ok: false, text: `El reporte no cumple la checklist: ${textCheck.errors.join("; ")}.` };
 
-			const markdown = renderReport({
+			const base = {
 				finding: { ...finding, cvss: vector, score: scored.score },
 				records,
 				program: config.program,
@@ -743,19 +747,27 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				reproSeqs,
 				initialSeq,
 				warnings: textCheck.warnings,
-			});
-			const check = validateReport(markdown, reportLang);
-			if (!check.ok) return { ok: false, text: `El reporte no cumple la checklist: falta ${check.missing.join(", ")}.` };
+			};
+			// S78/task 1: the platform copy does not presuppose access to the evidence chain; the
+			// internal copy (with seqs, hashes and the not-documented list) stays in evidence/.
+			const internal = renderReport({ ...base, audience: "internal" });
+			const external = renderReport({ ...base, audience: "external" });
+			const checkInternal = validateReport(internal, reportLang, "internal");
+			const checkExternal = validateReport(external, reportLang, "external");
+			if (!checkInternal.ok) return { ok: false, text: `El reporte interno no cumple la checklist: falta ${checkInternal.missing.join(", ")}.` };
+			if (!checkExternal.ok) return { ok: false, text: `El reporte externo no cumple la checklist: falta ${checkExternal.missing.join(", ")}.` };
 
 			await mkdir(join(workspace, "reports"), { recursive: true });
 			const path = join(workspace, "reports", `${finding.id}.md`);
-			await writeFile(path, markdown, "utf8");
+			await writeFile(path, external, "utf8");
+			const internalPath = join(evidenceDir, `${finding.id}.report-internal.md`);
+			await writeFile(internalPath, internal, "utf8");
 			await findings.update(finding.id, { cvss: vector, score: scored.score, notes: [input.summary ?? "reporte generado"] }, "reporte");
 			await status.note(`reporte ${finding.id} escrito en ${path} (espera envío humano)`);
 			await refresh("El reporte está escrito: lo revisás y lo mandás vos.");
 			return {
 				ok: true,
-				text: `Reporte escrito en ${path}\nSeveridad calculada: ${scored.score.toFixed(1)} (${scored.severity}) — ${vector}\nNo se envió a ninguna plataforma: eso lo hacés vos.`,
+				text: `Reporte escrito en ${path} (copia con seqs y hashes: ${internalPath})\nSeveridad calculada: ${scored.score.toFixed(1)} (${scored.severity}) — ${vector}\nNo se envió a ninguna plataforma: eso lo hacés vos.`,
 			};
 		},
 

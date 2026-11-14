@@ -84,7 +84,7 @@ test("(b) prerequisites come from the vector, and prose that contradicts it is f
 	assert.match(deriveConditions(prHigh, "es").map((item) => item.text).join(" "), /privilegios altos/);
 });
 
-test("(c)(e) evidence is extracted from the chain, with signatures, expected and omitted seqs", async () => {
+test("(c)(e) evidence is extracted from the chain into the internal copy, with signatures and short expected lines", async () => {
 	const h = await setup();
 	try {
 		await buildChain(h.dir);
@@ -99,19 +99,76 @@ test("(c)(e) evidence is extracted from the chain, with signatures, expected and
 			sensitiveData: "Facturas con email de terceros",
 		});
 		assert.equal(report.ok, true, report.text);
-		const markdown = await readFile(join(h.dir, "work", "lab", "reports", `${h.findingId}.md`), "utf8");
-		assert.match(markdown, /## Condiciones previas/);
-		assert.match(markdown, /No requiere credenciales/);
-		assert.match(markdown, /CWE-639/);
-		assert.match(markdown, /Dato sensible expuesto/);
-		assert.match(markdown, /Hallazgo inicial \(seq 1\)/);
-		assert.match(markdown, /Reproducción del verificador/);
-		assert.match(markdown, /seq 3.*firma válida/s);
-		assert.match(markdown, /GET http:\/\/127\.0\.0\.1:3000\/api\/invoices\/2/);
-		assert.match(markdown, /estado: 200/);
-		assert.match(markdown, /Sin documentar/);
-		assert.match(markdown, /veredicto en seq 5/);
-		assert.match(markdown, /Esperado: Abrir la factura 2/);
+		const internal = await readFile(join(h.dir, "work", "lab", "evidence", `${h.findingId}.report-internal.md`), "utf8");
+		const external = await readFile(join(h.dir, "work", "lab", "reports", `${h.findingId}.md`), "utf8");
+
+		// Both copies: the parts a platform needs.
+		for (const markdown of [internal, external]) {
+			assert.match(markdown, /## Condiciones previas/);
+			assert.match(markdown, /No requiere credenciales/);
+			assert.match(markdown, /CWE-639/);
+			assert.match(markdown, /Dato sensible expuesto/);
+			assert.match(markdown, /Reproducción del verificador/);
+			assert.match(markdown, /GET http:\/\/127\.0\.0\.1:3000\/api\/invoices\/2/);
+			assert.match(markdown, /estado: 200/);
+			assert.match(markdown, /Esperado: 200 OK/);
+		}
+
+		// Internal only: chain concepts.
+		assert.match(internal, /Hallazgo inicial \(seq 1\)/);
+		assert.match(internal, /seq 3.*firma válida/s);
+		assert.match(internal, /Sin documentar/);
+		assert.match(internal, /veredicto en seq 5/);
+		assert.match(internal, /sha256 [0-9a-f]{16}/);
+
+		// External: nothing that presupposes the chain.
+		assert.doesNotMatch(external, /Sin documentar/);
+		assert.doesNotMatch(external, /sha256/);
+		assert.doesNotMatch(external, /\bseq \d/);
+		assert.match(external, /Reproducción 1/);
+	} finally {
+		await h.cleanup();
+	}
+});
+
+test("(S78/1) the template is the only source of the step number", async () => {
+	const h = await setup();
+	try {
+		await buildChain(h.dir);
+		const written = await h.session.report({
+			findingId: h.findingId,
+			metrics: METRICS,
+			summary: "Un IDOR permite leer facturas ajenas. El verificador lo reprodujo dos veces.",
+			steps: ["1. GET /api/invoices/2 sin credenciales.", "2) Repetir el mismo pedido."],
+			impact: "Lectura de facturas ajenas.",
+			remediation: "Validar propiedad.",
+		});
+		assert.equal(written.ok, true, written.text);
+		const external = await readFile(join(h.dir, "work", "lab", "reports", `${h.findingId}.md`), "utf8");
+		assert.match(external, /^1\. GET \/api\/invoices\/2 sin credenciales\.$/m);
+		assert.match(external, /^2\. Repetir el mismo pedido\.$/m);
+		assert.doesNotMatch(external, /^1\. 1\./m);
+		assert.doesNotMatch(external, /^2\. 2\)/m);
+	} finally {
+		await h.cleanup();
+	}
+});
+
+test("(S78/1) the second expected line is a short comparison, not the whole step again", async () => {
+	const h = await setup();
+	try {
+		await buildChain(h.dir);
+		await h.session.report({
+			findingId: h.findingId,
+			metrics: METRICS,
+			summary: "Un IDOR permite leer facturas ajenas. El verificador lo reprodujo dos veces.",
+			steps: ["GET /api/invoices/2", "Repetir el mismo pedido"],
+			impact: "Lectura de facturas ajenas.",
+			remediation: "Validar propiedad.",
+		});
+		const external = await readFile(join(h.dir, "work", "lab", "reports", `${h.findingId}.md`), "utf8");
+		assert.match(external, /Esperado: 200 OK, respuesta completa/);
+		assert.doesNotMatch(external, /Esperado: Repetir el mismo pedido/);
 	} finally {
 		await h.cleanup();
 	}
@@ -160,8 +217,8 @@ test("(f) report_lang defaults to en and accepts es; the report follows it", asy
 		assert.match(markdown, /## Prerequisites/);
 		assert.match(markdown, /## Evidence/);
 		assert.doesNotMatch(markdown, /## Condiciones previas/);
-		assert.equal(validateReport(markdown, "en").ok, true);
-		assert.equal(validateReport(markdown, "es").ok, false);
+		assert.equal(validateReport(markdown, "en", "external").ok, true);
+		assert.equal(validateReport(markdown, "es", "external").ok, false);
 	} finally {
 		await h.cleanup();
 	}
@@ -220,6 +277,31 @@ test("(S76/5) with report_redact off the prose is kept as written", async () => 
 		assert.equal(written.ok, true, written.text);
 		const markdown = await readFile(join(h.dir, "work", "lab", "reports", `${h.findingId}.md`), "utf8");
 		assert.match(markdown, /session=abc123/);
+	} finally {
+		await h.cleanup();
+	}
+});
+
+
+test("(S78/1) the external copy drops chain references from the prose, the internal one keeps them", async () => {
+	const h = await setup();
+	try {
+		await buildChain(h.dir);
+		const written = await h.session.report({
+			findingId: h.findingId,
+			metrics: METRICS,
+			summary: "Reproducción 1: GET /api/invoices/2 (evidencia seq 5). El verificador lo repitió (verificación seq 5 con veredicto REPRODUCIDO).",
+			steps: ["GET /api/invoices/2 (evidencia seq 3)."],
+			impact: "Lectura de facturas ajenas.",
+			remediation: "Validar propiedad.",
+		});
+		assert.equal(written.ok, true, written.text);
+		const external = await readFile(join(h.dir, "work", "lab", "reports", `${h.findingId}.md`), "utf8");
+		const internal = await readFile(join(h.dir, "work", "lab", "evidence", `${h.findingId}.report-internal.md`), "utf8");
+		assert.doesNotMatch(external, /\bseq\s*\d/);
+		assert.doesNotMatch(external, /veredicto REPRODUCIDO/);
+		assert.match(internal, /evidencia seq 5/);
+		assert.match(internal, /verificación seq 5 con veredicto REPRODUCIDO/);
 	} finally {
 		await h.cleanup();
 	}

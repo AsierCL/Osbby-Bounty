@@ -110,6 +110,7 @@ const reporterTask = [
 	"- impact: coherente con el vector; PR:N significa que NO hace falta autenticarse.",
 	"- remediation: concreta, una o dos frases.",
 	"- Escribí en español.",
+	"- No menciones números de seq, hashes ni la cadena de evidencia: el reporte va a una plataforma. Decí \"reproducción 1\" y \"reproducción 2\".",
 	`Datos: hallazgo ${findingId}, endpoint ${finding.endpoint}${finding.parameter === null ? "" : ` (parámetro ${finding.parameter})`}, título ${JSON.stringify(finding.title)}.`,
 	`Vector: ${vector}.`,
 	`Podés leer la cadena de evidencia en ${join(root, "work", program, "evidence", "log.jsonl")} (registros execution y execution-result, con seq).`,
