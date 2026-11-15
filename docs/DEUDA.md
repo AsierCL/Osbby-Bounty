@@ -64,6 +64,16 @@ Desde S47 esto **no puede pasar en el camino normal**: el scope exige `lab: true
 responde con `lab: true`, y un alcance real con el stub activo **se niega a cargar** dejando el error
 en `status.md`. Queda como atafeta de verificación, con dos variables y log en cada uso.
 
+## 10. `required_headers` con `contains`: Unicode y acentos sin normalizar (S85, abierto, nivel bajo)
+
+La comparación de `mode: contains` es `toLowerCase()` y `includes()`: no normaliza Unicode. Un valor con
+acentos o con formas equivalentes (`é` precompuesto vs `e` + combinante), o un header con mayúsculas
+turcas, puede no matchear aunque "se vea" igual.
+
+Riesgo: bajo. Afecta solo a programas que exijan un token con acentos dentro de un header, que hoy no
+conocemos. No se arregla ahora: si aparece un caso real, la corrección es `normalize("NFC")` (o
+`toUpperCase()` con locale fijo) en la comparación, con test del caso concreto.
+
 ## 6. El agente explora el repo en vez de cazar (S60, hipótesis, sin acción)
 
 **Síntoma observado** (tres corridas reales durante S43): en vez de llamar `bounty_run`, el modelo

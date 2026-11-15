@@ -14,8 +14,14 @@ Una acción se deniega en el primer chequeo que falla. No hay "warn and continue
 4. **Headers obligatorios** del programa (`required_headers`): se comparan contra los headers que la
    petición **envía de verdad** (`-H`/`--header`). Un valor simple exige coincidencia exacta; la forma
    `{value, mode: contains}` exige que el valor contenga el texto (Bugcrowd pide "bugcrowd" dentro del
-   User-Agent). Antes de S79/S82 la comprobación era vacua: la sesión pasaba el requisito como si fuera
-   la petición, así que nunca podía fallar.
+   User-Agent).
+
+   **Qué pasó con S79, para que no se repita**: el chequeo existía, pero era **vacuo**. La sesión le
+   pasaba al gate el requisito como si fueran los headers de la petición, así que el gate comparaba el
+   requisito consigo mismo y **nunca podía fallar**: cualquier corrida pasaba, mandara o no el header.
+   Un chequeo que no se vio fallar nunca no está probado. El test que lo prueba de verdad es el que
+   corre sin el header y exige que **no se ejecute** (`tests/required-headers.test.ts:69`, "sin header ⇒
+   no ejecuta"); los tests de "presente ⇒ pasa" no distinguen un chequeo real de uno vacuo.
 5. **Rate declarado**: si el scope no declara `rate_rps`, se deniega todo. Un presupuesto que no
    existe no se puede respetar.
 6. **Alcance de cada host contactado**: target, URLs del argv, hosts sueltos del argv, archivos de

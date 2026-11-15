@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { gate } from "../src/core/gate.ts";
 import { parseScope } from "../src/core/scope.ts";
 import { createSession, headersFromArgs } from "../src/pi/session.ts";
+import { summarizeScope } from "../src/core/scope.ts";
 
 const deps = { dns: async () => ({ cname: [] as string[] }), readFile: async () => "" };
 const target = "http://127.0.0.1:3000/x";
@@ -126,4 +127,41 @@ test("S82: a cookie value with a dot is not a host, but a URL in a custom header
 	const callback = await gate(plain.policy, { target, headers: {}, argv: ["-sS", "-H", "X-Callback: https://otro.example/x", target] } as never, deps);
 	assert.equal(callback.allowed, false, JSON.stringify(callback));
 	if (!callback.allowed) assert.match(callback.detail ?? "", /otro\.example/);
+});
+
+test("S85/1: a multi-pair Cookie is one header value; neither pair is a host", async () => {
+	const plain = parseScope("program: lab\nlab: true\nauthorized_on: 2026-01-01\nin_scope:\n  - 127.0.0.1:3000\nlimits:\n  rate_rps: 5\n");
+	assert.equal(plain.ok, true);
+	if (!plain.ok) return;
+	// The whole header as a single args token, exactly how curl receives it.
+	const cookie = await gate(
+		plain.policy,
+		{ target, headers: {}, argv: ["-sS", "-H", "Cookie: session=abc.def; other=xyz.123", target] } as never,
+		deps,
+	);
+	assert.equal(cookie.allowed, true, JSON.stringify(cookie));
+	// And the gate did not silently treat any part as a contact.
+	if (cookie.allowed) assert.deepEqual(cookie.contacts.map((contact) => contact.host), ["127.0.0.1"]);
+});
+
+test("S85/1: a scheme URL anywhere inside the same Cookie still blocks", async () => {
+	const plain = parseScope("program: lab\nlab: true\nauthorized_on: 2026-01-01\nin_scope:\n  - 127.0.0.1:3000\nlimits:\n  rate_rps: 5\n");
+	assert.equal(plain.ok, true);
+	if (!plain.ok) return;
+	for (const header of [
+		"Cookie: redirect=https://evil.example/x",
+		"Cookie: session=abc.def; next=http://evil.example/y",
+		"Cookie: a=1; b=2; cb=https://evil.example/z",
+	]) {
+		const result = await gate(plain.policy, { target, headers: {}, argv: ["-sS", "-H", header, target] } as never, deps);
+		assert.equal(result.allowed, false, `${header}: ${JSON.stringify(result)}`);
+		if (!result.allowed) assert.match(result.detail ?? "", /evil\.example/);
+	}
+});
+
+test("S85/2: the scope summary shows the mode only when it is contains", async () => {
+	const policyWithBoth = policy("  X-Bounty-Id: abc-123\n  User-Agent:\n    value: bugcrowd\n    mode: contains");
+	const summary = summarizeScope(policyWithBoth);
+	assert.match(summary, /Headers obligatorios: X-Bounty-Id, User-Agent \(contiene "bugcrowd"\)/);
+	assert.doesNotMatch(summary, /X-Bounty-Id \(/, "the historical exact case keeps showing just the name");
 });

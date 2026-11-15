@@ -555,6 +555,20 @@ export function evaluate(
 }
 
 /**
+ * S85/task 2: how a required header is shown. Exact keeps the historical form (just the name); the
+ * "contains" mode is spelled out, because a bare name would hide why a header is being enforced.
+ */
+export function describeRequiredHeader(name: string, required: RequiredHeader): string {
+	return required.mode === "contains" ? `${name} (contiene "${required.value}")` : name;
+}
+
+export function describeRequiredHeaders(policy: { requiredHeaders: Record<string, RequiredHeader> }): string {
+	return Object.entries(policy.requiredHeaders)
+		.map(([name, required]) => describeRequiredHeader(name, required))
+		.join(", ");
+}
+
+/**
  * S75/task 4: one interpreted summary, shared by bounty_scope and the offline preflight, so the
  * preflight cannot describe a scope differently from the session that will use it.
  */
@@ -567,6 +581,10 @@ export function summarizeScope(policy: ScopePolicy, warnings: string[] = [], amb
 		...policy.outOfScope.map((rule) => `  - ${rule.raw}`),
 		`Ritmo declarado: ${policy.limits.rateRps ?? "sin declarar"} req/s`,
 		`Métodos: ${policy.limits.allowedMethods.join(", ") || "sin restricción"}`,
+		...(() => {
+			const headers = describeRequiredHeaders(policy);
+			return headers.length === 0 ? [] : [`Headers obligatorios: ${headers}`];
+		})(),
 		...(warnings.length > 0 ? ["Avisos:", ...warnings.map((warning) => `  - ${warning}`)] : []),
 		...(ambiguities.length > 0 ? ["A confirmar:", ...ambiguities.map((item) => `  - ${item}`)] : []),
 	].join("\n");

@@ -20,7 +20,7 @@ import { createFindingsStore, type Finding, type FindingsStore } from "../core/f
 import { gate, type DnsResolver, type GateRequest } from "../core/gate.ts";
 import { createRateLimiter, type Limiter } from "../core/ratelimit.ts";
 import { requestViewForModel, responseViewForModel, type RedactionMode } from "../core/redact.ts";
-import { parseScope, evaluate, summarizeScope, type ScopePolicy } from "../core/scope.ts";
+import { describeRequiredHeaders, parseScope, evaluate, summarizeScope, type ScopePolicy } from "../core/scope.ts";
 import { scoreVector } from "../core/cvss.ts";
 import { extractEvidence, renderReport, validateReport, validateReportText } from "../core/report.ts";
 import { randomUUID } from "node:crypto";
@@ -329,7 +329,8 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			}
 			if (parsed.policy.outOfScope.length === 0) ambiguities.push("el programa no declara nada fuera de alcance");
 			if (parsed.policy.requiredHeaders && Object.keys(parsed.policy.requiredHeaders).length > 0) {
-				ambiguities.push(`el programa exige cabeceras: ${Object.keys(parsed.policy.requiredHeaders).join(", ")}`);
+				// S85/task 2: the mode travels with the name; a bare name hides why it is enforced.
+				ambiguities.push(`el programa exige cabeceras: ${describeRequiredHeaders(parsed.policy)}`);
 			}
 
 			const summary = summarizeScope(parsed.policy, parsed.warnings, ambiguities);

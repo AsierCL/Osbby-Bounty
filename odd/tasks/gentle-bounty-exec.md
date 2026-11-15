@@ -1954,3 +1954,21 @@ esquema en cualquier header sigue bloqueando.
 **thefork**: no se cargó ningún scope. Guardarraíl de protocolo agregado: con credencial compartida
 entre investigadores, no se cambia el identificador de un recurso por otro distinto del provisto sin
 confirmación explícita del humano.
+
+### L33 — S85: cookies multi-par, auditoría de forma y la nota de S79
+
+Encuadre: este hilo solo mejora la herramienta de forma agnóstica a programas concretos; los hallazgos
+reales pueden motivar una mejora, pero la mejora no asume nada de un programa.
+
+1. Test de regresión: `Cookie: session=abc.def; other=xyz.123` como un solo token de args pasa, y el
+   gate no registra ningún contacto además del target; una URL con esquema en cualquier parte del mismo
+   header (`Cookie: redirect=https://evil.example/x`, o en el medio de varios pares) sigue bloqueando.
+2. Auditoría de forma: el único lugar que asumía `Record<string, string>` era el resumen de la sesión
+   (solo nombres). Nuevo `describeRequiredHeader(s)` en `scope.ts`, usado por la sesión y por
+   `summarizeScope` (o sea, también por el preflight): `User-Agent (contiene "bugcrowd")`, y el caso
+   exacto sigue mostrando solo el nombre. Test en `required-headers`.
+3. `docs/gate.md`: nota de qué pasó con S79 (el chequeo se comparaba contra sí mismo y no podía fallar)
+   y por qué el test "sin header ⇒ no ejecuta" es el que lo prueba.
+4. `docs/DEUDA.md` §10: `contains` con Unicode/acentos sin normalizar, abierto, nivel bajo.
+
+Sin cambios en el gate más allá de los tests y la forma.
