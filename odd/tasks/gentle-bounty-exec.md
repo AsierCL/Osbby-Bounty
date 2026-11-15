@@ -2012,3 +2012,15 @@ el agente no podía inventariar binarios y concluyó (honestamente) "no pude com
 Playwright en esta máquina: driver 1.65.0 en el caché de npx y navegadores en `~/.cache/ms-playwright`
 (chromium-1247, chromium_headless_shell-1254, 288 MB). `npx --no-install playwright` no resuelve la
 versión: el wrapper acepta `GENTLE_BOUNTY_PLAYWRIGHT`.
+
+### L36 — S88: muro anti-bot detectado, jamás resuelto
+
+La sesión viva llegó al login de un programa real y se topó con un captcha de DataDome. Se negó a
+resolverlo y pidió que la herramienta "se saltara el DataDome". **No**: resolver un captcha es evadir el
+control de acceso de un tercero, el programa excluye servicios de terceros, no es un hallazgo y quema la
+cuenta.
+
+Lo que sí se agregó: `detectAntiBot()` (DataDome, Cloudflare, PerimeterX, hCaptcha, reCAPTCHA) y
+`scripts/browser.ts` corta con `captcha: {detected, provider}` y **exit 4**. Además `--state <archivo>`
+para apuntar a un storage state exportado por el humano, con solo la ruta en argv (ni cookies ni
+contraseña en la cadena). Tests: `nav-policy` (4).

@@ -52,6 +52,20 @@ no resuelve esa versión, por eso el wrapper acepta la ruta explícita en `GENTL
 
 Verificado en el lab: `status 200`, `title "Lab"`, captura y HTML escritos.
 
+## Un muro anti-bot es una parada, no un acertijo
+
+El wrapper detecta el muro (DataDome, Cloudflare, PerimeterX, hCaptcha, reCAPTCHA) y **corta**:
+
+- La salida JSON trae `captcha: {detected: true, provider: "datadome"}`.
+- El código de salida es **4**: "acá hace falta un humano".
+- No intenta resolver el captcha, ni parchea `navigator.webdriver`, ni rota fingerprints. **Resolver un
+  captcha es evadir el control de acceso de un tercero**: el programa no lo autoriza, no es un hallazgo
+  (los servicios de terceros están excluidos) y solo gasta la cuenta.
+
+El camino limpio es una sesión que ya pasó el muro de forma humana: `--state <archivo>` (o
+`GENTLE_BOUNTY_STORAGE_STATE`) con el storage state exportado desde un navegador logueado. En argv va
+solo la ruta: ni cookies ni contraseña quedan en la cadena.
+
 ## Qué NO protege
 
 - El bloqueo de terceros es deliberado y puede cambiar el comportamiento del objetivo: si DataDome no

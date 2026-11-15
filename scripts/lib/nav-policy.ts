@@ -36,3 +36,24 @@ export function makeNavPolicy(scopeText: string): NavPolicy {
 		},
 	};
 }
+
+/**
+ * S88: recognize an anti-bot wall so the run STOPS instead of grinding. Solving a captcha is evading a
+ * third party's access control: the program does not authorize it, and this tool does not do it. The
+ * honest output is "a human is needed here".
+ */
+const ANTI_BOT_MARKERS: { provider: string; markers: RegExp[] }[] = [
+	{ provider: "datadome", markers: [/captcha-delivery\.com/i, /datadome/i, /geo\.captcha-delivery/i] },
+	{ provider: "cloudflare", markers: [/cf-challenge/i, /challenges\.cloudflare\.com/i, /cf_chl_opt/i] },
+	{ provider: "perimeterx", markers: [/px-captcha/i, /perimeterx/i, /_pxI/i] },
+	{ provider: "hcaptcha", markers: [/hcaptcha\.com/i, /h-captcha/i] },
+	{ provider: "recaptcha", markers: [/recaptcha\/api\.js/i, /g-recaptcha/i] },
+];
+
+export function detectAntiBot(html: string, blockedUrls: string[] = []): { detected: boolean; provider: string | null } {
+	const haystack = `${html}\n${blockedUrls.join("\n")}`;
+	for (const entry of ANTI_BOT_MARKERS) {
+		if (entry.markers.some((marker) => marker.test(haystack))) return { detected: true, provider: entry.provider };
+	}
+	return { detected: false, provider: null };
+}

@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { makeNavPolicy } from "../scripts/lib/nav-policy.ts";
+import { detectAntiBot, makeNavPolicy } from "../scripts/lib/nav-policy.ts";
 
 const SCOPE = "program: lab\nlab: true\nauthorized_on: 2026-01-01\nin_scope:\n  - www.acme.com\n  - 127.0.0.1:3000\nout_of_scope:\n  - admin.acme.com\nlimits:\n  rate_rps: 5\n";
 
@@ -26,4 +26,13 @@ test("non-network schemes are not treated as traffic", () => {
 
 test("a scope that does not parse refuses to build the policy", () => {
 	assert.throws(() => makeNavPolicy("program: [\n"), /scope does not parse/);
+});
+
+test("S88: an anti-bot wall is detected so the run stops instead of grinding", () => {
+	const datadome = detectAntiBot('<iframe src="https://geo.captcha-delivery.com/captcha/?x&dm=cd"></iframe>');
+	assert.deepEqual(datadome, { detected: true, provider: "datadome" });
+	assert.equal(detectAntiBot('<div class="cf-challenge"></div>').provider, "cloudflare");
+	assert.equal(detectAntiBot("<html>hola</html>").detected, false);
+	// A blocked third-party captcha host is enough evidence even if the HTML came empty.
+	assert.equal(detectAntiBot("", ["https://geo.captcha-delivery.com/captcha/"]).provider, "datadome");
 });

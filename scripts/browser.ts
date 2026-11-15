@@ -8,7 +8,10 @@
  *     and aborts anything outside it, including third-party assets;
  *   - takes headers from `-H "Name: value"` in argv, so a required User-Agent is real;
  *   - never reads credentials from argv: use a Playwright storage-state file (cookies) via
- *     GENTLE_BOUNTY_STORAGE_STATE, and the password stays wherever you typed it;
+ *     GENTLE_BOUNTY_STORAGE_STATE or --state, and the password stays wherever you typed it;
+ *   - detects an anti-bot wall (DataDome and friends) and STOPS: report the wall, never solve it.
+ *     Solving a captcha is evading a third party's access control, which the program does not
+ *     authorize and this tool does not do. Exit code 4 means "a human is needed here";
  *   - writes a screenshot and/or the HTML to files, and prints one JSON line.
  *
  * Usage (through bounty_run, the only way the agent should reach it):
@@ -22,6 +25,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 
+import { detectAntiBot } from "./lib/nav-policy.ts";
 import { makeNavPolicy } from "./lib/nav-policy.ts";
 
 const argv = process.argv.slice(2);
@@ -76,7 +80,7 @@ function loadPlaywright(): { chromium: { launch(options?: Record<string, unknown
 
 const playwright = loadPlaywright();
 const browser = (await (playwright.chromium.launch({ headless: true }) as Promise<{ newContext(options?: Record<string, unknown>): Promise<{ newPage(): Promise<unknown>; storageState?(): Promise<unknown> }>; close(): Promise<void> }>));
-const storage = process.env.GENTLE_BOUNTY_STORAGE_STATE;
+const storage = flag("--state") ?? process.env.GENTLE_BOUNTY_STORAGE_STATE;
 const context = await browser.newContext({
 	...(Object.keys(headers).length > 0 ? { extraHTTPHeaders: headers } : {}),
 	...(storage === undefined || storage.length === 0 ? {} : { storageState: storage }),
@@ -107,19 +111,31 @@ try {
 	if (Number.isFinite(wait) && wait > 0) await page.waitForTimeout(wait);
 	const out = flag("--out");
 	if (out !== null) await writeFile(out, (await page.screenshot({ fullPage: true })) as never);
-	const html = flag("--html");
-	if (html !== null) await writeFile(html, await page.content(), "utf8");
+	const htmlPath = flag("--html");
+	const html = await page.content();
+	if (htmlPath !== null) await writeFile(htmlPath, html, "utf8");
+	// An anti-bot wall is a stop condition, not a puzzle to solve.
+	const captcha = detectAntiBot(html, blocked);
 	console.log(
 		JSON.stringify({
 			url,
 			status,
 			title: await page.title(),
+			captcha,
 			blockedRequests: blocked.slice(0, 20),
 			blockedCount: blocked.length,
 			out,
 			html,
 		}),
 	);
+	if (captcha.detected) {
+		await browser.close();
+		console.error(
+			`anti-bot wall detected (${captcha.provider ?? "unknown"}). This tool does not solve captchas: ` +
+				"a human logs in, or the program authorizes another path.",
+		);
+		process.exit(4);
+	}
 } catch (caught) {
 	error = (caught as Error).message.slice(0, 200);
 	console.log(JSON.stringify({ url, status, error, blockedRequests: blocked.slice(0, 20), blockedCount: blocked.length }));
