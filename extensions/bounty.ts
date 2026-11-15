@@ -11,7 +11,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import { resolveCname } from "node:dns/promises";
+import { resolve4, resolve6, resolveCname } from "node:dns/promises";
 import { isIP } from "node:net";
 
 import { createSession, type ProgramSession, type ToolExecution } from "../src/pi/session.ts";
@@ -55,16 +55,34 @@ function redactionMode(): RedactionMode {
 	return process.env.GENTLE_BOUNTY_REDACTION === "on" ? "on" : "off";
 }
 
-/** DNS answer for the gate: no CNAME record is a valid answer, a resolver failure is not. */
-async function resolveForGate(host: string): Promise<{ cname: string[] } | { error: string }> {
-	if (isIP(host) !== 0 || host === "localhost") return { cname: [] };
+/**
+ * DNS answer for the gate (S87): the CNAME chain AND the final addresses. No record is a valid
+ * answer; a resolver failure is not, and a name with no address is a failure too (fail closed).
+ */
+async function resolveForGate(host: string): Promise<{ cname: string[]; addresses: string[] } | { error: string }> {
+	if (isIP(host) !== 0 || host === "localhost") return { cname: [], addresses: [] };
+	const soft = new Set(["ENODATA", "ENOTFOUND", "ENOTIMP", "ESERVFAIL", "EREFUSED"]);
+	const codeOf = (error: unknown) => (error as { code?: string }).code ?? "unknown";
+
+	let cname: string[] = [];
 	try {
-		return { cname: await resolveCname(host) };
+		cname = await resolveCname(host);
 	} catch (error) {
-		const code = (error as { code?: string }).code ?? "unknown";
-		if (code === "ENODATA" || code === "ENOTFOUND" || code === "ENOTIMP") return { cname: [] };
-		return { error: code };
+		const code = codeOf(error);
+		if (!soft.has(code)) return { error: code };
 	}
+
+	const addresses: string[] = [];
+	for (const resolve of [resolve4, resolve6]) {
+		try {
+			addresses.push(...(await resolve(host)));
+		} catch (error) {
+			const code = codeOf(error);
+			if (!soft.has(code)) return { error: code };
+		}
+	}
+	if (addresses.length === 0) return { error: `no address records for ${host}` };
+	return { cname, addresses };
 }
 
 function runProcess(argv: string[], cwd: string, toolPath: string[] = []): Promise<ToolExecution> {

@@ -13,6 +13,7 @@
 import { DEFAULT_FETCH_ALLOW, isFetchAllowed } from "./fetch-allow.ts";
 import { evaluate, type ScopePolicy } from "./scope.ts";
 import { parseLooseHost, parseTarget, type Target } from "./target.ts";
+import { classifyAddress, isInternalAddress } from "./ip-safety.ts";
 
 export interface DnsAnswer {
 	cname?: string[];
@@ -119,6 +120,35 @@ function looksLikeConnectionHost(value: string): boolean {
 }
 const BARE_HOST = /^[A-Za-z0-9._:*[\]-]+$/;
 const MAX_DNS_DEPTH = 6;
+
+/**
+ * S87: a CNAME into shared CDN/cloud infrastructure is not "leaving scope": the request still goes
+ * out with the Host/SNI of the in-scope name. These suffixes are exempt from the name-in-scope rule
+ * for a CNAME hop, and NOT from the address check: the final IPs are still inspected.
+ *
+ * A CNAME to anything else that is not in scope stays denied: that can be a subdomain pointing at
+ * something the target no longer controls, which is a real finding.
+ */
+export const SHARED_INFRASTRUCTURE_SUFFIXES = [
+	"fastly.net",
+	"fastlylb.net",
+	"cloudfront.net",
+	"akamaiedge.net",
+	"akamai.net",
+	"akamaized.net",
+	"edgekey.net",
+	"edgesuite.net",
+	"elb.amazonaws.com",
+	"cloudflare.net",
+	"azureedge.net",
+	"trafficmanager.net",
+	"googleusercontent.com",
+];
+
+export function isSharedInfrastructure(host: string): boolean {
+	const lower = host.toLowerCase();
+	return SHARED_INFRASTRUCTURE_SUFFIXES.some((suffix) => lower === suffix || lower.endsWith(`.${suffix}`));
+}
 
 interface ParsedContact {
 	contact: Contact;
@@ -337,6 +367,18 @@ export async function gate(policy: ScopePolicy, request: GateRequest, deps: Gate
 		unique.push(entry);
 	}
 
+	/** Evidence reports each contacted host once, whatever port spelling produced it (S86/S87). */
+	const reportContacts = (): Contact[] => {
+		const hosts = new Set<string>();
+		const out: Contact[] = [];
+		for (const entry of unique) {
+			if (hosts.has(entry.contact.host)) continue;
+			hosts.add(entry.contact.host);
+			out.push(entry.contact);
+		}
+		return out;
+	};
+
 	for (const entry of unique) {
 		const verdict = evaluate(policy, entry.target);
 		if (verdict.verdict === "in") continue;
@@ -345,14 +387,14 @@ export async function gate(policy: ScopePolicy, request: GateRequest, deps: Gate
 				allowed: false,
 				reason: `out of scope: ${entry.contact.host}`,
 				detail: `rule "${verdict.rule}" excludes it (reached via ${entry.contact.source} ${JSON.stringify(entry.contact.raw)})`,
-				contacts: unique.map((item) => item.contact),
+				contacts: reportContacts(),
 			};
 		}
 		return {
 			allowed: false,
 			reason: `no in_scope rule matched ${entry.contact.host}${entry.target.port === null ? "" : `:${entry.target.port}`}`,
 			detail: `${verdict.reason} (reached via ${entry.contact.source} ${JSON.stringify(entry.contact.raw)})`,
-			contacts: unique.map((item) => item.contact),
+			contacts: reportContacts(),
 		};
 	}
 
@@ -373,7 +415,7 @@ export async function gate(policy: ScopePolicy, request: GateRequest, deps: Gate
 			allowed: false,
 			reason: `file flag value is a URL outside the scope and outside fetch_allow: ${entry.contact.host}`,
 			detail: `${entry.contact.raw} would be downloaded, and fetch_allow only allows ${fetchAllow.join(", ")}`,
-			contacts: unique.map((item) => item.contact),
+			contacts: reportContacts(),
 		};
 	}
 
@@ -394,6 +436,18 @@ export async function gate(policy: ScopePolicy, request: GateRequest, deps: Gate
 			if ("error" in answer) {
 				return { allowed: false, reason: `dns resolution failed for ${entry.contact.host}`, detail: answer.error };
 			}
+			// S87: the addresses matter more than the intermediate name. Skip the check for an IP
+			// literal the operator declared in scope (that is an explicit declaration, and how labs work).
+			if (policy.allowPrivate !== true && entry.target.isIp === false && Array.isArray(answer.addresses) && answer.addresses.length > 0) {
+				const internal = answer.addresses.find((address) => isInternalAddress(address));
+				if (internal !== undefined) {
+					return {
+						allowed: false,
+						reason: `${entry.contact.host} resolves to ${internal}, an internal address (${classifyAddress(internal)})`,
+						detail: "the name is in scope but the address is not public: that is the SSRF/rebinding shape. A lab may set allow_private.",
+					};
+				}
+			}
 			for (const name of answer.cname ?? []) {
 				const cnameTarget = canonical(name);
 				if (!cnameTarget) {
@@ -401,14 +455,18 @@ export async function gate(policy: ScopePolicy, request: GateRequest, deps: Gate
 				}
 				const verdict = evaluate(policy, cnameTarget);
 				if (verdict.verdict !== "in") {
-					return {
-						allowed: false,
-						reason: `cname target ${cnameTarget.host} is not in scope`,
-						detail:
-							verdict.verdict === "out"
-								? `rule "${verdict.rule}" excludes the cname target`
-								: `no in_scope rule matched the cname target ${cnameTarget.host}`,
-					};
+					if (isSharedInfrastructure(cnameTarget.host)) {
+						notes.push(`cname target ${cnameTarget.host} is shared infrastructure: not required in scope, its addresses are still checked`);
+					} else {
+						return {
+							allowed: false,
+							reason: `cname target ${cnameTarget.host} is not in scope`,
+							detail:
+								verdict.verdict === "out"
+									? `rule "${verdict.rule}" excludes the cname target`
+									: `no in_scope rule matched the cname target ${cnameTarget.host}`,
+						};
+					}
 				}
 				if (visited.has(cnameTarget.host)) continue;
 				visited.add(cnameTarget.host);
@@ -422,5 +480,5 @@ export async function gate(policy: ScopePolicy, request: GateRequest, deps: Gate
 		}
 	}
 
-	return { allowed: true, contacts: unique.map((entry) => entry.contact), notes };
+	return { allowed: true, contacts: reportContacts(), notes };
 }

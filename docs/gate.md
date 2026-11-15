@@ -57,6 +57,37 @@ lineal del programa.
 
 **Estado: aplazada.** No bloquea fases D ni E. Se corrige cuando convenga.
 
+## CNAME, CDN y la IP final (S87)
+
+Un host en scope que resuelve por CNAME a infraestructura compartida (`www.thefork.com` →
+`thefork.map.fastly.net`, un ELB de AWS) **no está saliendo del scope**: la petición sigue saliendo con
+el Host/SNI del nombre que sí está en scope.
+
+**Lo que se quitó**: exigir que el **nombre** del salto CNAME estuviera él mismo en `in_scope`. Eso
+bloqueaba casi cualquier sitio de producción real detrás de un CDN o balanceador, y era un falso
+negativo (denegaba tráfico legítimo). El nombre de un salto CNAME se exime si termina en un sufijo de
+infraestructura compartida conocida (`SHARED_INFRASTRUCTURE_SUFFIXES` en `src/core/gate.ts`: `fastly.net`,
+`cloudfront.net`, `akamaiedge.net`, `akamai.net`, `akamaized.net`, `edgekey.net`, `edgesuite.net`,
+`elb.amazonaws.com`, `cloudflare.net`, `azureedge.net`, `trafficmanager.net`, `googleusercontent.com`).
+Un CNAME a cualquier **otro** dominio que no esté en scope sigue denegándose: eso puede ser un
+subdominio apuntando a algo que el objetivo ya no controla, y es un hallazgo real.
+
+**Lo que se mantiene y ahora se implementa de verdad**: la pregunta que protege es **a qué dirección se
+llega**, no cómo se llama el salto intermedio. El gate resuelve y comprueba la IP final: loopback,
+RFC1918, CGNAT, ULA (`fc00::/7`), link-local (`169.254/16`, `fe80::/10`), no especificada, IPv4 mapeada
+en IPv6, y las direcciones de metadatos de nube (`169.254.169.254`, `169.254.170.2`, `100.100.100.200`,
+`fd00:ec2::254`) se **deniegan** aunque el nombre del CNAME esté en la lista de proveedores. La lista de
+proveedores exime el nombre; no exime la dirección.
+
+Antes de S87 esta comprobación de IP **no existía**: `DnsAnswer.addresses` se recibía y no se miraba, y
+el chequeo de nombre de CNAME era lo único que había. Un nombre en scope que resolviera a
+`169.254.169.254` pasaba sin más. Por eso esto no es una relajación: es corregir qué pregunta se hace.
+
+**Excepción acotada**: un scope con `lab: true` puede declarar `allow_private: true` para apuntar a
+redes privadas propias (el laboratorio). Con `lab: false` la clave es un error de carga: un programa real
+no resuelve a direcciones internas. Y una IP literal declarada en `in_scope` no se vuelve a juzgar por su
+rango: es una declaración explícita del operador, y así funcionan los labs.
+
 ## Headers: destino de conexión vs entrada de prueba (S81)
 
 Un valor de header se trata como **destino de conexión** solo si de verdad tiene forma de host: URL con

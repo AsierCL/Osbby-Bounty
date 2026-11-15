@@ -1972,3 +1972,23 @@ reales pueden motivar una mejora, pero la mejora no asume nada de un programa.
 4. `docs/DEUDA.md` §10: `contains` con Unicode/acentos sin normalizar, abierto, nivel bajo.
 
 Sin cambios en el gate más allá de los tests y la forma.
+
+### L34 — S86 y S87: puerto por defecto del esquema, y CNAME de CDN vs IP final
+
+**S86 (bug real de campo)**: `target.ts:163` tomaba `port: url.port === "" ? null : Number(url.port)`, y
+la clase `URL` borra el puerto por defecto del esquema. Una regla `host:443` exige 443, así que nunca
+casaba con `https://host`: falso negativo que denegaba tráfico legítimo. Normalizado a 443/80 en el
+target (`withDefaultPort`, `normalization: "default-port"`); esquemas sin default no se tocan. El token
+suelto sin esquema sigue igual. **ATG estuvo afectado**: 6 gates denegados, 4 de ellos por esto
+(`https://www.atg.se`, `https://www.atg.se:443` ×2, y un `Origin: https://www.atg.se` que además era el
+bug de S81), y el workaround del token suelto `www.atg.se:443` fue lo que dejó pasar las corridas
+buenas. Tests: `scope-default-port` (9) + `target.test` actualizado.
+
+**S87 (bloqueo de campo con CDN)**: la comprobación de CNAME exigía que el **nombre** del salto estuviera
+en scope, y bloqueaba Fastly/ELB. Rediseño: (a) lista de sufijos de infraestructura compartida exentos
+del nombre; (b) comprobación real de la **IP final** (loopback, RFC1918, CGNAT, ULA, link-local,
+no especificada, IPv4 mapeada, metadatos), que antes no existía (`addresses` se recibía y se ignoraba);
+(c) `allow_private` solo con `lab: true`, si no es error de carga; (d) el resolver del hijo ahora
+devuelve `addresses` (resolve4/resolve6), si no la comprobación nueva sería código muerto. Tests:
+`gate-cdn` (7) + `ip-safety` unitario. Los contactos se reportan una vez por host (el dedupe de
+validación sigue siendo por host:puerto, S64).

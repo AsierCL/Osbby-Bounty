@@ -62,6 +62,12 @@ export interface ScopePolicy {
 	outOfScope: ScopeRule[];
 	limits: ScopeLimits;
 	requiredHeaders: Record<string, RequiredHeader>;
+	/**
+	 * S87: allow a name in scope to resolve to a private/loopback/metadata address. Off by default;
+	 * only a scope with `lab: true` may turn it on, because that is the only case where the operator
+	 * owns every address behind the name.
+	 */
+	allowPrivate: boolean;
 	automation: AutomationPolicy;
 	notes: string | null;
 }
@@ -85,6 +91,7 @@ const TOP_LEVEL_KEYS = new Set([
 	"out_of_scope",
 	"limits",
 	"required_headers",
+	"allow_private",
 	"automation",
 	"notes",
 ]);
@@ -472,6 +479,11 @@ export function parseScope(text: string): ScopeParseResult {
 	}
 
 	const requiredHeaders = asRequiredHeaders(doc.required_headers, errors);
+	let allowPrivate = false;
+	if (doc.allow_private !== undefined) {
+		if (doc.allow_private !== "true" && doc.allow_private !== "false") errors.push(`allow_private must be "true" or "false"`);
+		else allowPrivate = doc.allow_private === "true";
+	}
 	// S47: mandatory and strict. Without it the scope does not load, same fail-closed rule as the rest.
 	const labText = asString(doc.lab, "lab", errors);
 	let lab: boolean | null = null;
@@ -489,6 +501,8 @@ export function parseScope(text: string): ScopeParseResult {
 	const platform = asString(doc.platform, "platform", errors);
 	const notes = doc.notes === undefined ? null : typeof doc.notes === "string" ? doc.notes : null;
 
+	// S87: failing closed — a real program cannot declare its own names private.
+	if (allowPrivate && lab !== true) errors.push('allow_private is only allowed with lab: "true": a real program cannot resolve to private addresses');
 	if (errors.length > 0) return { ok: false, errors };
 
 	if (authorizedOn === null) warnings.push("authorized_on missing: the scope records no authorization date");
@@ -507,6 +521,7 @@ export function parseScope(text: string): ScopeParseResult {
 			outOfScope,
 			limits,
 			requiredHeaders,
+			allowPrivate,
 			automation,
 			notes,
 		},

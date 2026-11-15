@@ -23,11 +23,13 @@ function rejected(input: string, pattern: RegExp) {
 	assert.match(result.error, pattern);
 }
 
-test("absolute URL keeps scheme, host, port and path", () => {
+test("absolute URL keeps scheme, host, port and path, with the scheme's default port (S86)", () => {
 	const t = ok("https://acme.com/x/y?a=1");
 	assert.equal(t.scheme, "https");
 	assert.equal(t.host, "acme.com");
-	assert.equal(t.port, null);
+	// S86: the URL class drops the default port; a scope rule "acme.com:443" needs it back.
+	assert.equal(t.port, 443);
+	assert.ok(t.normalizations.includes("default-port"));
 	assert.equal(t.path, "/x/y");
 	assert.equal(t.query, "a=1");
 	assert.equal(t.isIp, false);

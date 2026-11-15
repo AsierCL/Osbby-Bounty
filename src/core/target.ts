@@ -30,6 +30,22 @@ const DOTTED_QUAD_RE = /^\d{1,3}(?:\.\d{1,3}){3}$/;
 const MAX_HOST_LENGTH = 253;
 const MAX_LABEL_LENGTH = 63;
 
+/**
+ * S86: the URL class drops the default port of a scheme, so `https://acme.com` and
+ * `https://acme.com:443` both arrived with `port === null`. A scope rule `acme.com:443` requires
+ * port 443, so it could never match a normal https URL: a false negative that denied legitimate
+ * traffic. The port is normalized here, once, and both sides of the comparison see the same value.
+ * Unknown schemes are left alone: no invented defaults.
+ */
+const DEFAULT_PORTS: Record<string, number> = { http: 80, https: 443 };
+
+function withDefaultPort(target: Target): Target {
+	if (target.port !== null || target.scheme === null) return target;
+	const defaultPort = DEFAULT_PORTS[target.scheme];
+	if (defaultPort === undefined) return target;
+	return { ...target, port: defaultPort, normalizations: [...target.normalizations, "default-port"] };
+}
+
 /** The host exactly as the caller spelled it, before any URL parser normalization. */
 function hostSpellingOf(input: string): string {
 	let authority = input;
@@ -122,7 +138,7 @@ export function parseTarget(input: string): ParseResult {
 				if (!again.ok) return { ok: false, error: again.error };
 				return {
 					ok: true,
-					target: {
+					target: withDefaultPort({
 						...again.target,
 						raw: input,
 						scheme: again.target.scheme ?? scheme,
@@ -133,7 +149,7 @@ export function parseTarget(input: string): ParseResult {
 								? null
 								: `${url.username}${url.password === "" ? "" : `:${url.password}`}`),
 						port: again.target.port ?? (url.port === "" ? null : Number(url.port)),
-					},
+					}),
 				};
 			}
 		}
@@ -154,7 +170,7 @@ export function parseTarget(input: string): ParseResult {
 
 	return {
 		ok: true,
-		target: {
+		target: withDefaultPort({
 			raw: input,
 			scheme,
 			host,
@@ -168,7 +184,7 @@ export function parseTarget(input: string): ParseResult {
 					? null
 					: `${url.username}${url.password === "" ? "" : `:${url.password}`}`,
 			normalizations,
-		},
+		}),
 	};
 }
 
