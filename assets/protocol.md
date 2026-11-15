@@ -93,3 +93,11 @@ pedir confirmación explícita al humano primero.** Cambiar un id "para ver qué
 un tercero que no aceptó nada, y eso no lo arregla el alcance del programa.
 
 Pedí confirmación antes, con el id provisto y el id que querés probar escritos en el pedido.
+
+## Credenciales: nunca en argv
+
+La cadena de evidencia es inmutable: lo que entra, queda. **No pongas contraseñas en `bounty_run`.** Si
+necesitás una sesión autenticada, se usan cookies de un navegador ya logueado (archivo de storage state)
+o se escribe la contraseña en el navegador, nunca como argumento.
+
+Una contraseña en argv es un registro permanente a cambio de nada.

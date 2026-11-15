@@ -17,7 +17,7 @@ import { createBudget, type BudgetPolicy } from "./budget.ts";
 import { createStopController, type StopController } from "./stop.ts";
 import { createEvidenceStore, sha256, type EvidenceStore } from "../core/evidence.ts";
 import { createFindingsStore, type Finding, type FindingsStore } from "../core/findings.ts";
-import { gate, type DnsResolver, type GateRequest } from "../core/gate.ts";
+import { gate, isHttpInvocation, type DnsResolver, type GateRequest } from "../core/gate.ts";
 import { createRateLimiter, type Limiter } from "../core/ratelimit.ts";
 import { requestViewForModel, responseViewForModel, type RedactionMode } from "../core/redact.ts";
 import { describeRequiredHeaders, parseScope, evaluate, summarizeScope, type ScopePolicy } from "../core/scope.ts";
@@ -393,6 +393,7 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				// S79/S82: the gate checks the required headers against what the tool will send, not
 				// against the requirement itself.
 				headers: headersFromArgs(args),
+				http: isHttpInvocation(input.tool, args),
 			};
 
 			// S63: the scope on disk must be the one a human confirmed. Edited scope => denied.

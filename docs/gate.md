@@ -12,7 +12,11 @@ Una acción se deniega en el primer chequeo que falla. No hay "warn and continue
 3. **Redirects**: si se piden y la política es `reject`, se deniega. Con `revalidate`, se permite y
    se emite la nota de que **cada salto debe re-validarse**.
 4. **Headers obligatorios** del programa (`required_headers`): se comparan contra los headers que la
-   petición **envía de verdad** (`-H`/`--header`). Un valor simple exige coincidencia exacta; la forma
+   petición **envía de verdad** (`-H`/`--header`), y **solo en invocaciones HTTP** (S88). Un binario
+   local como `which playwright` no manda cabeceras: pedirle un User-Agent lo volvía inutilizable. Cuenta
+   como HTTP un cliente conocido (`curl`, `wget`, `httpx`, `nuclei`, `playwright`, …) o cualquier token
+   de argv con URL con esquema. Hueco residual documentado: una herramienta que haga HTTP sin URL en
+   argv y sin estar en la lista no dispara la comprobación. Un valor simple exige coincidencia exacta; la forma
    `{value, mode: contains}` exige que el valor contenga el texto (Bugcrowd pide "bugcrowd" dentro del
    User-Agent).
 

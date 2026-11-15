@@ -1992,3 +1992,23 @@ no especificada, IPv4 mapeada, metadatos), que antes no existía (`addresses` se
 devuelve `addresses` (resolve4/resolve6), si no la comprobación nueva sería código muerto. Tests:
 `gate-cdn` (7) + `ip-safety` unitario. Los contactos se reportan una vez por host (el dedupe de
 validación sigue siendo por host:puerto, S64).
+
+### L35 — S88: headers solo en HTTP, y navegador real sin abrir un canal ciego
+
+Hallazgo de una sesión viva: `bounty_run tool="which" args=["playwright"]` devolvía "required header
+User-Agent is missing". La regla de cabeceras obligatorias se aplicaba a **cualquier** invocación, así que
+el agente no podía inventariar binarios y concluyó (honestamente) "no pude comprobarlo".
+
+- `gate.ts`: `isHttpInvocation(tool, argv)` (cliente HTTP conocido o URL con esquema en argv) y
+  `GateRequest.http`. Con `http: false` no se exigen cabeceras y queda una nota en el resultado.
+  `session.run` marca la invocación. Tests: `headers-http-only` (4).
+- Navegador: `scripts/browser.ts` + `scripts/lib/nav-policy.ts`. La URL va en argv (el gate la valida y
+  queda en la cadena), las cabeceras salen de `-H`, y **cada petición** de la página se decide con el
+  mismo matcher (`evaluate`); lo que no está en scope se aborta. Credenciales nunca por argv: storage
+  state del operador o login escrito por el humano. Tests: `nav-policy` (3). Verificado en el lab:
+  `status 200`, `title "Lab"`, captura y HTML escritos.
+- `docs/browser.md` y nota en `docs/gate.md`; regla nueva en `protocol.md`: credenciales nunca en argv.
+
+Playwright en esta máquina: driver 1.65.0 en el caché de npx y navegadores en `~/.cache/ms-playwright`
+(chromium-1247, chromium_headless_shell-1254, 288 MB). `npx --no-install playwright` no resuelve la
+versión: el wrapper acepta `GENTLE_BOUNTY_PLAYWRIGHT`.

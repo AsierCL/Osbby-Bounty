@@ -36,6 +36,8 @@ export interface GateRequest {
 	headers?: Record<string, string>;
 	technique?: string;
 	followRedirects?: boolean;
+	/** S88: false when the invocation makes no HTTP request (a local binary like `which` or `ls`). */
+	http?: boolean;
 	dns?: DnsResolver;
 }
 
@@ -144,6 +146,51 @@ export const SHARED_INFRASTRUCTURE_SUFFIXES = [
 	"trafficmanager.net",
 	"googleusercontent.com",
 ];
+
+/**
+ * S88: does this invocation make HTTP requests? Required program headers are an HTTP contract; asking
+ * a local binary like `which` to send a User-Agent is nonsense, and it made the tool unusable for
+ * inventory work ("which playwright" -> "required header User-Agent is missing").
+ *
+ * Rule: a known HTTP client, or any argv token that carries a scheme URL. A tool doing HTTP without a
+ * URL in argv and without being in the list is the residual gap, documented in docs/gate.md.
+ */
+const HTTP_CLIENTS = new Set([
+	"curl",
+	"wget",
+	"http",
+	"https",
+	"httpie",
+	"xh",
+	"httpx",
+	"nuclei",
+	"ffuf",
+	"feroxbuster",
+	"gobuster",
+	"dirb",
+	"dirsearch",
+	"wfuzz",
+	"katana",
+	"hakrawler",
+	"waybackurls",
+	"gau",
+	"nikto",
+	"sqlmap",
+	"ab",
+	"hey",
+	"vegeta",
+	"playwright",
+	"chromium",
+	"chromium-browser",
+	"google-chrome",
+	"firefox",
+]);
+
+export function isHttpInvocation(tool: string, argv: string[]): boolean {
+	const binary = (tool.trim().split(/[\\/]/).pop() ?? "").toLowerCase();
+	if (HTTP_CLIENTS.has(binary)) return true;
+	return argv.some((token) => /[a-z][a-z0-9+.-]*:\/\//i.test(token));
+}
 
 export function isSharedInfrastructure(host: string): boolean {
 	const lower = host.toLowerCase();
@@ -310,7 +357,13 @@ export async function gate(policy: ScopePolicy, request: GateRequest, deps: Gate
 	}
 
 	// 4. required program headers, checked against the headers the request actually sends (S79/S82).
-	for (const [name, required] of Object.entries(policy.requiredHeaders)) {
+	// S88: only for invocations that make HTTP requests at all.
+	if (request.http === false) {
+		if (Object.keys(policy.requiredHeaders).length > 0) {
+			notes.push("required headers not checked: this invocation makes no HTTP request");
+		}
+	}
+	for (const [name, required] of request.http === false ? [] : Object.entries(policy.requiredHeaders)) {
 		const actual = headerValue(request.headers, name);
 		if (actual === null) return { allowed: false, reason: `required header ${name} is missing` };
 		const satisfied =
