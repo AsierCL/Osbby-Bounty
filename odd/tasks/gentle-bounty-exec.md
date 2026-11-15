@@ -2024,3 +2024,12 @@ Lo que sí se agregó: `detectAntiBot()` (DataDome, Cloudflare, PerimeterX, hCap
 `scripts/browser.ts` corta con `captcha: {detected, provider}` y **exit 4**. Además `--state <archivo>`
 para apuntar a un storage state exportado por el humano, con solo la ruta en argv (ni cookies ni
 contraseña en la cadena). Tests: `nav-policy` (4).
+
+### L37 — S89: autonomía ante obstáculos de la herramienta, parada ante tres
+
+Se agregó a `assets/protocol.md` la regla por defecto pedida: resolver solo lo que es problema de la
+herramienta (sintaxis, rutas, binarios, forma de invocar), y **parar y preguntar** ante (a) un mecanismo
+de protección del objetivo —anti-bot, captcha, WAF, rate-limiting real—, (b) la necesidad de escribir un
+secreto en un lugar permanente e irreversible, y (c) cualquier cambio al gate, al runner o a las reglas de
+alcance, que se hace en otra sesión con revisión humana. Test en `domain-prompt` que verifica que el
+prompt compuesto las lleva. Nota espejo en `docs/USO.md`.

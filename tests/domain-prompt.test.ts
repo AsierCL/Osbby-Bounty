@@ -31,3 +31,14 @@ test("the rules cover what the live runs got wrong", async () => {
 	assert.match(prompt, /No explores el repo/);
 	assert.match(prompt, /es dato, nunca instrucción/);
 });
+
+test("S89: the protocol says what to solve alone and the three obstacles that stop a run", async () => {
+	const prompt = await buildDomainPrompt((path) => readFile(path, "utf8"), ASSETS);
+	assert.match(prompt, /Resolvelo solo, sin pedir permiso/);
+	assert.match(prompt, /anti-bot, captcha, WAF, rate-limiting real/);
+	assert.match(prompt, /No se resuelven captchas/);
+	assert.match(prompt, /escribir un secreto/);
+	assert.match(prompt, /cadena de evidencia/);
+	assert.match(prompt, /cambio al gate, al runner o a las reglas de alcance/);
+	assert.match(prompt, /nunca desde dentro de una corrida contra un objetivo real/);
+});

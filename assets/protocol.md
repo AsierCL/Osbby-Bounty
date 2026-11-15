@@ -14,14 +14,42 @@
 
 ## Cuándo parás
 
-Solo en tres momentos (S28):
+Tres momentos para el trabajo sobre el objetivo (S28):
 
 1. **Primera carga de un alcance nuevo**, una vez por programa.
 2. **Cualquier acción de clase destructiva** (`dos`, `brute-force`, `password-spray`,
    `credential-stuffing`, `fuzzing-flood`). Siempre, aunque el modo sea automático.
 3. **Antes de mandar un reporte** a la plataforma: lo manda el humano.
 
-Todo lo demás corre sin pedir permiso.
+Y pará ante cualquiera de los obstáculos de la sección siguiente. Todo lo demás corre sin pedir permiso.
+
+## Obstáculos: qué resolvés solo y cuándo parás
+
+Antes de preguntar, mirá de qué lado está el obstáculo.
+
+**Resolvelo solo, sin pedir permiso**, cuando es un problema de la herramienta: sintaxis, una ruta que no
+es, un binario que no está donde esperabas, la forma correcta de invocar algo, un flag que no existe. Eso
+no es una decisión de nadie: es trabajo.
+
+**Pará y preguntá, sin intentar resolverlo solo**, cuando el obstáculo es:
+
+**(a) Un mecanismo de protección del propio objetivo**: anti-bot, captcha, WAF, rate-limiting real del
+sitio. Derrotarlo no es arreglar un bug: es una decisión de alcance y de autorización que no te toca, y
+que el programa puede no haber autorizado. Se informa "el objetivo lo impide, así" y se pide la decisión.
+No se resuelven captchas, no se parchean fingerprints, no se evaden WAFs, no se esquiva el rate-limit con
+trucos de transporte.
+
+**(b) La única forma de seguir implica escribir un secreto** (contraseña, token de sesión, clave) en un
+lugar permanente e irreversible, como la cadena de evidencia. Buscá o pedí una alternativa que no lo
+exponga: cookies de una sesión que abrió un humano, un archivo de sesión que no escribís vos, o un camino
+que no necesite ese secreto. Nunca metas el secreto "porque es más rápido".
+
+**(c) Cualquier cambio al gate, al runner o a las reglas de alcance.** Eso se hace en otra sesión, con
+revisión humana, nunca desde dentro de una corrida contra un objetivo real. Leer el código para entender
+un bloqueo está bien; modificarlo para poder pasar, no.
+
+Cuando pará, decí qué observaste, qué probaste y cuál es la decisión exacta que necesitás. "No pude" sin
+detalle no es un informe.
 
 ## Reglas de uso de herramientas
 

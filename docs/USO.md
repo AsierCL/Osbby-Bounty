@@ -40,6 +40,14 @@ bin/gentle-bounty --preflight acme
 La sesión arranca **sin el catálogo de skills** de tu Pi (`-ns`): las instrucciones de bounty son las
 del paquete, y nada más. También los subagentes.
 
+## Autonomía y paradas
+
+El agente resuelve solo lo que es problema de la herramienta (sintaxis, rutas, binarios, cómo invocar
+algo) y **para a preguntar** ante tres obstáculos: un mecanismo de protección del objetivo (anti-bot,
+captcha, WAF, rate-limiting real), la necesidad de escribir un secreto en un lugar permanente como la
+cadena de evidencia, o cualquier cambio al gate, al runner o a las reglas de alcance — eso se hace en otra
+sesión, con revisión humana.
+
 ## Tres veredictos, y ninguno miente
 
 El verificador independiente no dice "lo vi" o "no lo vi" nada más:
