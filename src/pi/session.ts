@@ -18,7 +18,9 @@ import { createStopController, type StopController } from "./stop.ts";
 import { createEvidenceStore, sha256, type EvidenceStore } from "../core/evidence.ts";
 import { createFindingsStore, type Finding, type FindingsStore } from "../core/findings.ts";
 import { gate, isHttpInvocation, type DnsResolver, type GateRequest } from "../core/gate.ts";
-import { createRateLimiter, type Limiter } from "../core/ratelimit.ts";
+import type { Limiter, Reservation } from "../core/ratelimit.ts";
+import { createSharedRateLimiter } from "../core/shared-ratelimit.ts";
+import { createPendingQueue, type PendingQueue } from "../core/pending.ts";
 import { requestViewForModel, responseViewForModel, type RedactionMode } from "../core/redact.ts";
 import { describeRequiredHeaders, parseScope, evaluate, summarizeScope, type ScopePolicy } from "../core/scope.ts";
 import { scoreVector } from "../core/cvss.ts";
@@ -38,6 +40,8 @@ export interface ProgramConfig {
 	sessionId?: string;
 	/** Task 7: the runner's per-invocation token. When set, execution records are signed. */
 	invocationToken?: string;
+	/** S90: nobody is at the keyboard. A destructive action is queued, not approved, not executed. */
+	nightMode?: boolean;
 	/** S75/task 3d: redact the written report. Operator-level, default on. */
 	reportRedact?: boolean;
 	/** S75/task 3f: written report language. Operator-level, default "en". */
@@ -192,9 +196,44 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 
 	let policy: ScopePolicy | null = null;
 	let scopePath: string | null = null;
-	let limiter: Limiter | null = null;
+	// S89: the limit belongs to the program, not to this process. Two sessions of the same program
+	// share one bucket on disk (proven: two in-memory limiters doubled the declared rate).
+	let limiter: { reserve(host: string): Promise<Reservation> } | null = null;
 	const budget = createBudget(config.budget ?? {}, now);
 	const stopController = createStopController({ now });
+
+	// S89: per-host volume cap and the loop detector. Neither replaces the human pauses: they stop a
+	// session that is grinding, and say why.
+	const MAX_PER_HOST_DEFAULT = 300;
+	const hostCounts = new Map<string, number>();
+	let streak: { key: string; count: number } | null = null;
+	let stuck: { key: string; count: number; at: string } | null = null;
+
+	async function markStuck(key: string, count: number): Promise<void> {
+		stuck = { key, count, at: new Date(now()).toISOString() };
+		const state = await status.read();
+		state.stuck = stuck;
+		await status.write(state);
+		await status.note(`atascado: ${count} bloqueos seguidos por "${key}". La sesión se detuvo sola.`);
+		await refresh("Estoy atascado: no sigo con variaciones del mismo bloqueo. Necesito tu decisión para continuar.");
+	}
+
+	/** Returns a refusal when this block is the fifth in a row with the same cause. */
+	async function noteBlock(key: string): Promise<ToolResult | null> {
+		if (stuck !== null) {
+			return { ok: false, text: `La sesión está atascada (${stuck.key}, ${stuck.count} veces). No ejecuto nada más hasta que decidas algo: cambiá de enfoque o cerrá el programa.` };
+		}
+		streak = streak !== null && streak.key === key ? { key, count: streak.count + 1 } : { key, count: 1 };
+		if (streak.count < 5) return null;
+		await markStuck(key, streak.count);
+		return { ok: false, text: `Cinco bloqueos seguidos por el mismo motivo (${key}): paro sola. Quedó anotado en ${status.file()}. No insisto con variaciones de lo mismo.` };
+	}
+
+	function noteSuccess(): void {
+		streak = null;
+	}
+
+	const pending = createPendingQueue({ dir: workspace, now });
 
 	async function refresh(next?: string): Promise<string> {
 		const state = await status.read();
@@ -214,6 +253,7 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 		sessionId,
 		stopController,
 
+		pendingQueue: pending,
 		async applyVerifierVerdict(input) {
 			const finding = await findings.get(input.findingId);
 			if (!finding) return { ok: false, text: `No existe el hallazgo ${input.findingId}.` };
@@ -318,10 +358,11 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 
 			policy = parsed.policy;
 			scopePath = input.file;
-			limiter = createRateLimiter(
-				{ defaultRps: parsed.policy.limits.rateRps ?? 1, dailyCap: parsed.policy.limits.maxRequestsPerDay },
-				now,
-			);
+			limiter = createSharedRateLimiter({
+				dir: workspace,
+				policy: { defaultRps: parsed.policy.limits.rateRps ?? 1, dailyCap: parsed.policy.limits.maxRequestsPerDay },
+				clock: now,
+			});
 
 			const ambiguities: string[] = [];
 			if (parsed.policy.inScope.some((rule) => rule.wildcard)) {
@@ -373,11 +414,15 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			if (stopController.isStopped()) {
 				return { ok: false, text: `Parada de emergencia activa (${stopController.reason() ?? "sin motivo"}): no se ejecuta nada.` };
 			}
+			if (stuck !== null) {
+				return { ok: false, text: `La sesión está atascada (${stuck.key}, ${stuck.count} veces): no ejecuto nada más hasta que decidas algo.` };
+			}
 			let current: ScopePolicy;
 			try {
 				current = requirePolicy();
 			} catch (error) {
-				return { ok: false, text: (error as Error).message };
+				const blocked = await noteBlock("no scope loaded");
+				return blocked ?? { ok: false, text: (error as Error).message };
 			}
 			// S78/task 2: `args` is what the tool receives, never the tool name. A model that repeats the
 			// tool inside args once produced `curl curl …`, and curl fetched both positionally: the gate
@@ -515,6 +560,27 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				await refresh("Esperando tu OK explícito para la acción destructiva.");
 
 				const resolved = resolveConfirm({ env: deps.env, lab: current.lab, uiConfirm: input.confirm ?? deps.confirm });
+				const nightMode = config.nightMode === true || deps.env?.GENTLE_BOUNTY_NIGHT_MODE === "1";
+				// S90: without a human at the keyboard the action is QUEUED, never approved. Night mode
+				// queues even when a UI exists: the point of night mode is that nobody is there.
+				if (resolved.source === "none" || nightMode) {
+					const item = await pending.append({
+						tool: input.tool,
+						argv: args,
+						target: input.target,
+						classes: classification.classes,
+						reason: classification.reason ?? "clase destructiva",
+						why: input.why ?? "",
+						sessionId,
+					});
+					await status.setPending(null);
+					await status.note(`acción destructiva encolada: ${item.id} — ${command}`);
+					await refresh("Acción destructiva encolada: sigo con otras líneas hasta que la resuelvas.");
+					return {
+						ok: false,
+						text: `Acción destructiva encolada como ${item.id} en ${pending.file()}: no hay diálogo humano disponible${nightMode ? " (modo nocturno)" : ""}. No se ejecutó nada y la sesión sigue. La cola no autoriza nada: se resuelve con tu tecla.`,
+					};
+				}
 				const approved = await resolved.confirm(confirmQuestion(classification, command, input.target));
 				const outcome = resolved.source === "none" ? "unavailable" : approved ? "granted" : "denied";
 				const at = new Date(now()).toISOString();
@@ -555,14 +621,29 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 
 			if (limiter !== null) {
 				const host = decision.contacts[0]?.host ?? "unknown";
-				const reservation = limiter.reserve(host);
+				const reservation = await limiter.reserve(host);
 				if (!reservation.allowed) {
 					await status.note(`frenado por ritmo: ${reservation.reason}`);
 					await refresh();
-					return { ok: false, text: `Frenado por el límite del programa: ${reservation.reason}` };
+					const blocked = await noteBlock(`rate: ${reservation.reason}`);
+					return blocked ?? { ok: false, text: `Frenado por el límite del programa: ${reservation.reason}` };
 				}
 				if (reservation.delayMs > 0) await new Promise((resolve) => setTimeout(resolve, reservation.delayMs));
 			}
+
+			const primaryHost = decision.contacts[0]?.host ?? "unknown";
+			const perHostCap = current.limits.maxRequestsPerHost ?? MAX_PER_HOST_DEFAULT;
+			const used = hostCounts.get(primaryHost) ?? 0;
+			if (used >= perHostCap) {
+				const blocked = await noteBlock(`per-host cap on ${primaryHost}`);
+				return (
+					blocked ?? {
+						ok: false,
+						text: `Tope por host alcanzado: ${perHostCap} ejecuciones contra ${primaryHost} en esta corrida (limits.max_requests_per_host). No ejecuto más contra ese host; puedo seguir con otros hosts del alcance.`,
+					}
+				);
+			}
+			hostCounts.set(primaryHost, used + 1);
 
 			const budgetHit = budget.toolCall();
 			if (budgetHit !== null) {
@@ -602,6 +683,16 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			});
 
 			if (typeof execution.tokens === "number") budget.tokens(execution.tokens);
+
+			// S89 loop detector: a 403/429 or an anti-bot marker is a block signal; a normal response resets.
+			const statusMatch = /(?:^|\s)(\d{3})\s*$/.exec(execution.stdout.trim()) ?? /^HTTP\/[\d.]+\s+(\d{3})/m.exec(execution.stdout);
+			const httpStatus = statusMatch?.[1] ?? null;
+			const antiBot = /captcha-delivery|datadome|cf-challenge|perimeterx|hcaptcha|recaptcha/i.exec(execution.stdout);
+			if (execution.exitCode === 0 && (httpStatus === null || (/^[23]/.test(httpStatus) && antiBot === null))) {
+				noteSuccess();
+			} else if (httpStatus === "403" || httpStatus === "429" || antiBot !== null) {
+				await noteBlock(`http:${httpStatus ?? "?"}:${antiBot?.[0]?.toLowerCase() ?? "no-marker"}`);
+			}
 
 			const viewed = responseViewForModel(
 				{ status: execution.exitCode, headers: {}, body: execution.stdout || execution.stderr },

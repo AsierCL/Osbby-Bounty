@@ -9,6 +9,7 @@
 import { DEFAULT_FETCH_ALLOW } from "./fetch-allow.ts";
 
 export interface BudgetConfig {
+	/** Milliseconds; the operator writes hours in the config file (S89). */
 	maxWallMs?: number;
 	maxToolCalls?: number;
 	maxTokens?: number;
@@ -40,7 +41,7 @@ export const DEFAULT_CONFIG: GlobalConfig = {
 };
 
 const KNOWN_KEYS = new Set(["fetch_allow", "tool_path", "mcp", "redaction", "budget", "accounts", "report_redact", "report_lang"]);
-const KNOWN_BUDGET_KEYS = new Set(["max_wall_ms", "max_tool_calls", "max_tokens"]);
+const KNOWN_BUDGET_KEYS = new Set(["max_wall_ms", "max_duration_hours", "max_tool_calls", "max_tokens"]);
 
 export function parseGlobalConfig(text: string): { ok: true; config: GlobalConfig } | { ok: false; errors: string[] } {
 	let raw: unknown;
@@ -121,6 +122,8 @@ export function parseGlobalConfig(text: string): { ok: true; config: GlobalConfi
 				return value;
 			};
 			budget.maxWallMs = positive("max_wall_ms", node.max_wall_ms);
+			const hours = positive("max_duration_hours", node.max_duration_hours);
+			if (hours !== undefined) budget.maxWallMs = hours * 60 * 60 * 1000;
 			budget.maxToolCalls = positive("max_tool_calls", node.max_tool_calls);
 			budget.maxTokens = positive("max_tokens", node.max_tokens);
 		}

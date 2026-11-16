@@ -17,6 +17,12 @@ export type Reservation =
 	| { allowed: true; host: string; delayMs: number }
 	| { allowed: false; host: string; reason: string };
 
+export interface LimiterBucket {
+	tokens: number;
+	last: number;
+	spent: number;
+}
+
 export interface LimiterStats {
 	spent: number;
 	tokens: number;
@@ -27,16 +33,43 @@ export interface Limiter {
 	stats(host: string): LimiterStats;
 }
 
-interface Bucket {
-	tokens: number;
-	last: number;
-	spent: number;
-}
+type Bucket = LimiterBucket;
 
 function assertPositiveRate(value: unknown, label: string): asserts value is number {
 	if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
 		throw new Error(`${label} must be a positive number of requests per second, got ${String(value)}`);
 	}
+}
+
+/** The bucket math, shared by the in-memory limiter and the cross-process one (S89). */
+export function reserveInBucket(bucket: Bucket, rate: number, capacity: number, dailyCap: number | null, host: string, now: number): Reservation {
+	const elapsed = Math.max(0, now - bucket.last);
+	bucket.tokens = Math.min(capacity, bucket.tokens + (elapsed * rate) / 1000);
+	bucket.last = Math.max(bucket.last, now);
+	if (dailyCap !== null && bucket.spent >= dailyCap) {
+		return { allowed: false, host, reason: `daily cap of ${dailyCap} requests reached for ${host}` };
+	}
+	bucket.spent += 1;
+	if (bucket.tokens >= 1) {
+		bucket.tokens -= 1;
+		return { allowed: true, host, delayMs: 0 };
+	}
+	// S89: the wait is relative to the last reservation, not to `now`. With two sessions reserving at
+	// the same instant, "delay from now" let both sleep the same 500ms and execute together, doubling
+	// the program's rate. The slot belongs at `last` + the time to earn one token.
+	const readyAt = bucket.last + ((1 - bucket.tokens) / rate) * 1000;
+	const delayMs = Math.max(0, Math.ceil(readyAt - now));
+	bucket.tokens = 0;
+	bucket.last = Math.max(bucket.last, now, readyAt);
+	return { allowed: true, host, delayMs };
+}
+
+export function rateFor(policy: LimiterPolicy, host: string): number {
+	return policy.perHost?.[host] ?? policy.defaultRps;
+}
+
+export function capacityFor(policy: LimiterPolicy, rate: number): number {
+	return policy.burst ?? Math.max(1, Math.ceil(rate));
 }
 
 export function createRateLimiter(policy: LimiterPolicy, clock: () => number): Limiter {
@@ -56,50 +89,22 @@ export function createRateLimiter(policy: LimiterPolicy, clock: () => number): L
 	const buckets = new Map<string, Bucket>();
 	const dailyCap = policy.dailyCap ?? null;
 
-	function rateFor(host: string): number {
-		return policy.perHost?.[host] ?? policy.defaultRps;
-	}
-
-	function capacityFor(rate: number): number {
-		return policy.burst ?? Math.max(1, Math.ceil(rate));
-	}
-
 	return {
 		reserve(host: string): Reservation {
-			const rate = rateFor(host);
-			const capacity = capacityFor(rate);
+			const rate = rateFor(policy, host);
+			const capacity = capacityFor(policy, rate);
 			const now = clock();
 			let bucket = buckets.get(host);
 			if (!bucket) {
 				bucket = { tokens: capacity, last: now, spent: 0 };
 				buckets.set(host, bucket);
 			}
-
-			// Refill. A clock that moves backwards must not create tokens.
-			const elapsed = Math.max(0, now - bucket.last);
-			bucket.tokens = Math.min(capacity, bucket.tokens + (elapsed * rate) / 1000);
-			bucket.last = Math.max(bucket.last, now);
-
-			if (dailyCap !== null && bucket.spent >= dailyCap) {
-				return { allowed: false, host, reason: `daily cap of ${dailyCap} requests reached for ${host}` };
-			}
-
-			bucket.spent += 1;
-			if (bucket.tokens >= 1) {
-				bucket.tokens -= 1;
-				return { allowed: true, host, delayMs: 0 };
-			}
-
-			const needed = 1 - bucket.tokens;
-			const delayMs = Math.ceil((needed / rate) * 1000);
-			bucket.tokens = 0;
-			bucket.last = Math.max(bucket.last, now + delayMs);
-			return { allowed: true, host, delayMs };
+			return reserveInBucket(bucket, rate, capacity, dailyCap, host, now);
 		},
 
 		stats(host: string): LimiterStats {
 			const bucket = buckets.get(host);
-			if (!bucket) return { spent: 0, tokens: capacityFor(rateFor(host)) };
+			if (!bucket) return { spent: 0, tokens: capacityFor(policy, rateFor(policy, host)) };
 			return { spent: bucket.spent, tokens: Math.max(0, bucket.tokens) };
 		},
 	};

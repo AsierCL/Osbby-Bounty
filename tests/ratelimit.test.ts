@@ -104,5 +104,7 @@ test("delays never go negative and never shrink below the token interval", () =>
 			delays.push(reservation.delayMs);
 		}
 	}
-	for (const delay of delays) assert.ok(delay <= 1000, `delay ${delay} exceeded one interval`);
+	// S89: with a frozen clock the reservations queue up at one interval each, instead of each one
+	// claiming "one interval from now" (which let two sessions sleep together and double the rate).
+	assert.deepEqual(delays, [0, 1000, 2000, 3000, 4000]);
 });

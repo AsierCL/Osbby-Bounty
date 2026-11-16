@@ -33,6 +33,8 @@ export interface ScopeRule {
 export interface ScopeLimits {
 	rateRps: number | null;
 	maxRequestsPerDay: number | null;
+	/** S89: real executions allowed against a single host within one run. Independent of the rate. */
+	maxRequestsPerHost: number | null;
 	forbidden: string[];
 	allowedMethods: string[];
 	redirects: "reject" | "revalidate";
@@ -429,6 +431,7 @@ export function parseScope(text: string): ScopeParseResult {
 	const limitsNode = doc.limits;
 	let limits: ScopeLimits = {
 		rateRps: null,
+		maxRequestsPerHost: null,
 		maxRequestsPerDay: null,
 		forbidden: [],
 		allowedMethods: [],
@@ -445,6 +448,7 @@ export function parseScope(text: string): ScopeParseResult {
 			}
 			limits = {
 				rateRps: asNumber(limitsNode.rate_rps, "limits.rate_rps", errors),
+				maxRequestsPerHost: asNumber(limitsNode.max_requests_per_host, "limits.max_requests_per_host", errors),
 				maxRequestsPerDay: asNumber(limitsNode.max_requests_per_day, "limits.max_requests_per_day", errors),
 				forbidden: asList(limitsNode.forbidden, "limits.forbidden", errors) ?? [],
 				allowedMethods: (asList(limitsNode.allowed_methods, "limits.allowed_methods", errors) ?? []).map((method) =>
@@ -595,6 +599,7 @@ export function summarizeScope(policy: ScopePolicy, warnings: string[] = [], amb
 		`Fuera de alcance: ${policy.outOfScope.length} regla(s)`,
 		...policy.outOfScope.map((rule) => `  - ${rule.raw}`),
 		`Ritmo declarado: ${policy.limits.rateRps ?? "sin declarar"} req/s`,
+		`Tope por host: ${policy.limits.maxRequestsPerHost ?? "sin declarar (300 por defecto)"} ejecuciones`,
 		`Métodos: ${policy.limits.allowedMethods.join(", ") || "sin restricción"}`,
 		...(() => {
 			const headers = describeRequiredHeaders(policy);

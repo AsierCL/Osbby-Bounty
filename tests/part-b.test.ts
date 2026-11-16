@@ -88,13 +88,15 @@ test("7a + B3: granted, denied and unavailable are recorded and reported distinc
 		await denied.cleanup();
 	}
 
-	// unavailable: no confirm callback at all
+	// unavailable: no confirm callback at all. S90: it is queued, not silently denied, and the
+	// session keeps going; nothing runs.
 	const unavailable = await harness({});
 	try {
 		const result = await unavailable.session.run(HYDRA);
-		assert.match(result.text, /sin UI: no confirmada a las \d{2}:\d{2}/);
+		assert.match(result.text, /encolada como P-0001/);
+		assert.equal((await unavailable.session.pendingQueue.pending()).length, 1);
 		const events = (await unavailable.store.read()).filter((record) => record.kind === "confirmation").map((record) => (record.payload as { event: string }).event);
-		assert.deepEqual(events, ["requested", "unavailable"]);
+		assert.deepEqual(events, ["requested"]);
 	} finally {
 		await unavailable.cleanup();
 	}

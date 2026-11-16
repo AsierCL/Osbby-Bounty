@@ -197,6 +197,15 @@ async function preflight(program, root) {
 	return failures.length === 0 ? 0 : 1;
 }
 
+function packageRootOf() {
+	return resolve(dirname(fileURLToPath(import.meta.url)), "..");
+}
+
+function printMorning(report) {
+	console.log(report.text);
+	return true;
+}
+
 async function main(argv) {
 	const check = argv.includes("--check");
 	const probeIndex = argv.indexOf("--probe");
@@ -214,6 +223,24 @@ async function main(argv) {
 		console.error("usage: gentle-bounty <program> [--check] [--probe <file>] [-- <pi args>]");
 		process.exit(2);
 	}
+	// S89/S90: read-only summaries.
+	if (argv.includes("--morning")) {
+		const { morningReport } = await import("../scripts/lib/morning.ts");
+		process.exit(typeof morningReport === "function" ? (printMorning(await morningReport(process.env.GENTLE_BOUNTY_ROOT ?? process.cwd())) ? 0 : 0) : 0);
+	}
+	const pendingIndex = argv.indexOf("--pending");
+	if (pendingIndex >= 0) {
+		const target = argv[pendingIndex + 1];
+		if (!target || target.startsWith("--")) {
+			console.error("usage: gentle-bounty --pending <programa>");
+			process.exit(2);
+		}
+		const root = process.env.GENTLE_BOUNTY_ROOT ?? process.cwd();
+		// The human's TTY is the confirmation surface; an agent has no path to it.
+		const child = spawnSync(process.execPath, ["--experimental-strip-types", join(packageRootOf(), "scripts", "pending-cli.ts"), root, target], { stdio: "inherit" });
+		process.exit(child.status ?? 1);
+	}
+
 	const preflightIndex = argv.indexOf("--preflight");
 	if (preflightIndex >= 0) {
 		const target = argv[preflightIndex + 1];

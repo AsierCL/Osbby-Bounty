@@ -462,6 +462,87 @@ export default function bountyExtension(pi: PiLike): void {
 	});
 
 	pi.registerTool({
+		name: "bounty_pending",
+		label: "Bounty pending destructive",
+		description:
+			"Read the queue of destructive actions nobody could approve (action=list) or ask the read-only annotator for a plain-language risk note on each item (action=annotate). The queue is never an authorization: it is resolved by the human with a real keystroke.",
+		parameters: {
+			type: "object",
+			additionalProperties: false,
+			properties: { program: { type: "string" }, action: { type: "string", enum: ["list", "annotate"] } },
+			required: ["program", "action"],
+		} as never,
+		async execute(_toolCallId, params) {
+			const resolved = resolveProgram(params.program);
+			if (!resolved.ok) return text(resolved.text, { ok: false });
+			const session = await sessionFor(resolved.program);
+			if (params.action === "list") {
+				const items = await session.pendingQueue.list();
+				if (items.length === 0) return text("No hay acciones destructivas pendientes.", { ok: true });
+				return text(
+					items
+						.map((item) => `${item.id} · ${item.resolution === undefined ? "pendiente" : item.resolution.outcome} · ${item.tool} ${item.argv.join(" ")} · ${item.reason}${item.annotation === undefined ? "" : ` · riesgo ${item.annotation.risk} (opinión, no aprobación)`}`)
+						.join("\n"),
+					{ ok: true },
+				);
+			}
+			// The annotator is read-only and only writes notes: it cannot approve anything.
+			const asset = await readFile(join(assetsDir, "agents", "bounty-annotate.md"), "utf8");
+			const tools = (/^tools:\s*(.+)$/m.exec(asset)?.[1] ?? "").split(",").map((tool) => tool.trim()).filter(Boolean);
+			const pending = await session.pendingQueue.pending();
+			if (pending.length === 0) return text("No hay acciones destructivas pendientes: no hay nada que anotar.", { ok: true });
+			const runner = createPiRunner({
+				piCommand: process.env.GENTLE_BOUNTY_PI ? [process.env.GENTLE_BOUNTY_PI] : ["pi"],
+				extensionEntry: fileURLToPath(import.meta.url),
+				defaultTimeoutMs: 10 * 60 * 1000,
+			});
+			const result = await runner.run({
+				agent: { name: "bounty-annotate", tools },
+				task: [
+					"Leé la cola de acciones destructivas pendientes y anotá cada ítem. Devolvé SOLO un array JSON, sin texto alrededor.",
+					`Archivo: ${session.pendingQueue.file()}`,
+					'Forma: [{"id":"P-0001","risk":"low|medium|high","touchesThirdPartyData":true|false,"financialEffect":true|false,"whatCouldHappen":"...","recommendation":"approve|hold|discard","note":"..."}]',
+					"Tu salida es una OPINIÓN para que el humano decida más rápido, nunca una aprobación. No ejecutes nada.",
+				].join("\n"),
+				cwd: root,
+				env: { GENTLE_BOUNTY_ROOT: root, GENTLE_BOUNTY_PROGRAM: resolved.program },
+				timeoutMs: 10 * 60 * 1000,
+			});
+			const start = result.output.indexOf("[");
+			const end = result.output.lastIndexOf("]");
+			if (start < 0 || end <= start) return text(`El anotador no devolvió JSON legible. Salida: ${result.output.slice(0, 200)}`, { ok: false });
+			let parsed: unknown;
+			try {
+				parsed = JSON.parse(result.output.slice(start, end + 1));
+			} catch (error) {
+				return text(`El anotador devolvió JSON inválido: ${(error as Error).message}`, { ok: false });
+			}
+			const list = Array.isArray(parsed) ? parsed : [];
+			const written: string[] = [];
+			for (const entry of list) {
+				const record = entry as Record<string, unknown>;
+				if (typeof record.id !== "string") continue;
+				const item = pending.find((candidate) => candidate.id === record.id);
+				if (item === undefined) continue;
+				await session.pendingQueue.annotate(record.id, {
+					at: new Date().toISOString(),
+					risk: record.risk === "high" || record.risk === "medium" ? record.risk : "low",
+					touchesThirdPartyData: record.touchesThirdPartyData === true,
+					financialEffect: record.financialEffect === true,
+					whatCouldHappen: String(record.whatCouldHappen ?? ""),
+					recommendation: record.recommendation === "approve" || record.recommendation === "discard" ? record.recommendation : "hold",
+					note: String(record.note ?? ""),
+				});
+				written.push(record.id);
+			}
+			return text(
+				`Anotados ${written.length} ítem(s): ${written.join(", ")}. Esto es una opinión, no una aprobación: la decisión es del humano.`,
+				{ ok: true },
+			);
+		},
+	});
+
+	pi.registerTool({
 		name: "bounty_report",
 		label: "Bounty report",
 		description:

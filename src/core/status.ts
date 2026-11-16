@@ -41,6 +41,8 @@ export interface ProgramState {
 	scopeEvents: { at: string; text: string }[];
 	/** S75/task 2: the last verifier verdict, so status.md shows verification as a dated event. */
 	lastVerification: { at: string; finding: string; event: string; detail: string } | null;
+	/** S89: the loop detector stopped the session. The human has to decide something to continue. */
+	stuck: { key: string; count: number; at: string } | null;
 	nextStep: string;
 	notes: string[];
 	updatedAt: string;
@@ -113,12 +115,21 @@ export function renderStatus(input: {
 	}
 	lines.push("");
 
-	lines.push("## Esperando tu confirmación");
+	const stuck = state.stuck ?? null;
+	const disputedFindings = findings.filter((finding) => finding.state === "disputed");
+	lines.push(stuck === null && disputedFindings.length === 0 ? "## Esperando tu confirmación" : "## Parado: esperando una decisión tuya");
 	lines.push("");
+	if (stuck !== null) {
+		lines.push(`- **Atascado**: ${stuck.count} bloqueos seguidos por el mismo motivo (${stuck.key}). No sigo con variaciones del mismo bloqueo.`);
+		lines.push(`  - desde: ${stuck.at.replace("T", " ").slice(0, 19)} UTC`);
+	}
+	if (disputedFindings.length > 0) {
+		lines.push(`- **Disputas**: ${disputedFindings.map((finding) => finding.id).join(", ")} — el verificador no las reprodujo sobre un hallazgo ya verificado. Las resolvés vos.`);
+	}
 	const lastConfirmation = state.lastConfirmation ?? null;
-	if (state.pending === null && lastConfirmation === null) {
+	if (state.pending === null && lastConfirmation === null && stuck === null && disputedFindings.length === 0) {
 		lines.push("Nada pendiente: sigo solo.");
-	} else if (state.pending === null) {
+	} else if (state.pending === null && stuck === null && disputedFindings.length === 0) {
 		lines.push("Nada pendiente ahora.");
 	}
 	if (lastConfirmation !== null) {
@@ -210,6 +221,7 @@ export function createStatusStore(options: { workDir: string; program: string; n
 			lastConfirmation: null,
 			scopeEvents: [],
 			lastVerification: null,
+			stuck: null,
 			nextStep: "",
 			notes: [],
 			updatedAt: new Date(now()).toISOString(),

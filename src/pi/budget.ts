@@ -13,10 +13,15 @@ export interface BudgetPolicy {
 	maxTokens?: number;
 }
 
+/**
+ * S89: volume is the main limit, the clock is a safety net. 500 tool calls is roughly a night of
+ * methodical work; 8 hours is deliberately generous so it only catches a runaway session, not real
+ * work. Tokens scale with the volume: ~50k tokens per call on average, with headroom.
+ */
 export const DEFAULT_BUDGET: Required<BudgetPolicy> = {
-	maxWallMs: 45 * 60 * 1000,
-	maxToolCalls: 40,
-	maxTokens: 2_000_000,
+	maxWallMs: 8 * 60 * 60 * 1000,
+	maxToolCalls: 500,
+	maxTokens: 25_000_000,
 };
 
 export type BudgetLimit = "wall" | "toolCalls" | "tokens";
@@ -57,8 +62,8 @@ export function createBudget(policy: BudgetPolicy = {}, now: () => number = () =
 	const wall = (): BudgetExceeded | null => {
 		const elapsed = now() - startedAt;
 		if (elapsed <= maxWallMs) return null;
-		const minutes = Math.round(maxWallMs / 60000);
-		return { limit: "wall", used: elapsed, max: maxWallMs, message: `pasó el límite de tiempo de la corrida (${minutes} min)` };
+		const hours = Math.round((maxWallMs / 3_600_000) * 10) / 10;
+		return { limit: "wall", used: elapsed, max: maxWallMs, message: `pasó el límite de tiempo de la corrida (${hours} h), que es red de seguridad y no límite de trabajo` };
 	};
 
 	return {
