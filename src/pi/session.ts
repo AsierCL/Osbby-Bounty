@@ -204,6 +204,32 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 	// share one bucket on disk (proven: two in-memory limiters doubled the declared rate).
 	let limiter: { reserve(host: string): Promise<Reservation> } | null = null;
 	const budget = createBudget(config.budget ?? {}, now);
+	// S101: the counter belongs to the program and is persisted in state.json, so a restart continues
+	// from what was already spent instead of resetting to zero (or to a phantom limit).
+	let budgetRestored = false;
+	async function persistBudget(limitHit: string | null): Promise<void> {
+		const snapshot = budget.snapshot();
+		const state = await status.read();
+		state.budget = {
+			toolCalls: snapshot.toolCalls,
+			tokens: snapshot.tokens,
+			startedAt: new Date(snapshot.startedAt).toISOString(),
+			limitHit,
+		};
+		await status.write(state);
+	}
+	async function ensureBudgetRestored(): Promise<void> {
+		if (budgetRestored) return;
+		budgetRestored = true;
+		const state = await status.read();
+		const persisted = state.budget;
+		if (persisted === undefined || persisted === null) return;
+		budget.restore({
+			toolCalls: persisted.toolCalls,
+			tokens: persisted.tokens,
+			startedAt: Date.parse(persisted.startedAt),
+		});
+	}
 	const stopController = createStopController({ now });
 
 	// S89: per-host volume cap and the loop detector. Neither replaces the human pauses: they stop a
@@ -385,6 +411,11 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			await status.setScopeHash(hash);
 			const previous = await status.read();
 			const alreadyConfirmed = previous.scopeConfirmedHash === hash;
+			// S101: reloading the scope is the operator's way of resuming after extending the budget.
+			if (previous.budget?.limitHit !== null && previous.budget?.limitHit !== undefined) {
+				previous.budget.limitHit = null;
+				await status.write(previous);
+			}
 
 			policy = parsed.policy;
 			scopePath = input.file;
@@ -435,6 +466,7 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 
 			await status.retireScopeNotes();
 			await status.confirmScope(hash);
+
 			await refresh("Con el alcance confirmado, arranco el reconocimiento.");
 			return { ok: true, text: `${summary}\n\nAlcance confirmado por un humano (hash ${hash.slice(0, 12)}…). Arranco.` };
 		},
@@ -443,6 +475,14 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			await mkdir(workspace, { recursive: true });
 			if (stopController.isStopped()) {
 				return { ok: false, text: `Parada de emergencia activa (${stopController.reason() ?? "sin motivo"}): no se ejecuta nada.` };
+			}
+			await ensureBudgetRestored();
+			const spentState = await status.read();
+			if (spentState.budget?.limitHit !== null && spentState.budget?.limitHit !== undefined) {
+				return {
+					ok: false,
+					text: `Presupuesto alcanzado: pausado por límite de ${spentState.budget.limitHit === "wall" ? "tiempo" : spentState.budget.limitHit === "tokens" ? "tokens" : "llamadas"}. Ampliá el presupuesto en .bounty/config.json y reiniciá la sesión: el progreso (${spentState.budget.toolCalls} llamadas) está guardado en ${status.file()}.`,
+				};
 			}
 			if (stuck !== null) {
 				return { ok: false, text: `La sesión está atascada (${stuck.key}, ${stuck.count} veces): no ejecuto nada más hasta que decidas algo.` };
@@ -770,10 +810,14 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 
 			const budgetHit = budget.toolCall();
 			if (budgetHit !== null) {
-				await status.note(`presupuesto agotado: ${budgetHit.message}`);
-				await refresh("Presupuesto de la corrida agotado. Decime si abrimos otra.");
-				return { ok: false, text: `Presupuesto agotado: ${budgetHit.message}. No se ejecutó nada.` };
+				await persistBudget(budgetHit.limit);
+				await status.note(
+					`Presupuesto alcanzado: pausado por límite de ${budgetHit.limit === "wall" ? "tiempo" : budgetHit.limit === "tokens" ? "tokens" : "llamadas"} (${budgetHit.message}). La evidencia quedó sellada; el progreso no se pierde.`,
+				);
+				await refresh("Presupuesto alcanzado: pausado. Ampliá el presupuesto y reiniciá para seguir.");
+				return { ok: false, text: `Presupuesto alcanzado: ${budgetHit.message}. La cadena quedó sellada; ampliá .bounty/config.json y reiniciá la sesión para continuar.` };
 			}
+			await persistBudget(null);
 
 			const executionAt = new Date(now()).toISOString();
 			const endpoint = new URL(input.target).pathname;

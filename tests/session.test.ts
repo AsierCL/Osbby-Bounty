@@ -313,10 +313,11 @@ test("a spent tool budget stops the run and says so in status.md", async () => {
 		assert.equal(first.ok, true, first.text);
 		const second = await session.run({ tool: "httpx", args: ["-u", "http://127.0.0.1:3000/b"], target: "http://127.0.0.1:3000/b" });
 		assert.equal(second.ok, false);
-		assert.match(second.text, /Presupuesto agotado: se alcanzó el límite de 1 llamadas/);
+		assert.match(second.text, /Presupuesto alcanzado/);
+		assert.match(second.text, /límite de 1 llamadas/);
 		assert.equal(executed.length, 1);
 		const text = await readFile(join(dir, "work", "lab", "status.md"), "utf8");
-		assert.match(text, /presupuesto agotado/i);
+		assert.match(text, /[Pp]resupuesto alcanzado/);
 	} finally {
 		await rm(dir, { recursive: true, force: true });
 	}

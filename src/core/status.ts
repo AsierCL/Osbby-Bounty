@@ -43,6 +43,8 @@ export interface ProgramState {
 	lastVerification: { at: string; finding: string; event: string; detail: string } | null;
 	/** S89: the loop detector stopped the session. The human has to decide something to continue. */
 	stuck: { key: string; count: number; at: string } | null;
+	/** S101: what the program spent, so a restart continues instead of resetting the counter. */
+	budget: { toolCalls: number; tokens: number; startedAt: string; limitHit: string | null };
 	nextStep: string;
 	notes: string[];
 	updatedAt: string;
@@ -115,6 +117,14 @@ export function renderStatus(input: {
 	}
 	lines.push("");
 
+	const budget = state.budget ?? { toolCalls: 0, tokens: 0, startedAt: "", limitHit: null };
+	if (budget.limitHit !== null) {
+		lines.push("", "## Presupuesto alcanzado");
+		lines.push("");
+		lines.push(`- Pausado por límite de ${budget.limitHit === "wall" ? "tiempo" : budget.limitHit === "tokens" ? "tokens" : "llamadas"} a las ${budget.startedAt.replace("T", " ").slice(0, 19)} UTC.`);
+		lines.push(`- Usado: ${budget.toolCalls} llamada(s), ${budget.tokens} token(s).`);
+		lines.push("- Para seguir: ampliá el presupuesto en `.bounty/config.json` y volvé a cargar el alcance; el progreso no se pierde.");
+	}
 	const stuck = state.stuck ?? null;
 	const disputedFindings = findings.filter((finding) => finding.state === "disputed");
 	lines.push(stuck === null && disputedFindings.length === 0 ? "## Esperando tu confirmación" : "## Parado: esperando una decisión tuya");
@@ -228,6 +238,7 @@ export function createStatusStore(options: { workDir: string; program: string; n
 			scopeEvents: [],
 			lastVerification: null,
 			stuck: null,
+			budget: { toolCalls: 0, tokens: 0, startedAt: new Date(now()).toISOString(), limitHit: null },
 			nextStep: "",
 			notes: [],
 			updatedAt: new Date(now()).toISOString(),

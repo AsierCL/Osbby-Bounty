@@ -37,6 +37,8 @@ export interface BudgetSnapshot {
 	toolCalls: number;
 	tokens: number;
 	elapsedMs: number;
+	/** S101: the start is persisted, so a restart continues the same clock instead of resetting it. */
+	startedAt: number;
 }
 
 export interface Budget {
@@ -45,6 +47,8 @@ export interface Budget {
 	tokens(count: number): BudgetExceeded | null;
 	exceeded(): BudgetExceeded | null;
 	snapshot(): BudgetSnapshot;
+	/** S101: continue from what the program already spent instead of starting at zero. */
+	restore(snapshot: { toolCalls?: number; tokens?: number; startedAt?: number }): void;
 }
 
 function positiveOr(value: number | undefined, fallback: number): number {
@@ -55,7 +59,7 @@ export function createBudget(policy: BudgetPolicy = {}, now: () => number = () =
 	const maxWallMs = positiveOr(policy.maxWallMs, DEFAULT_BUDGET.maxWallMs);
 	const maxToolCalls = positiveOr(policy.maxToolCalls, DEFAULT_BUDGET.maxToolCalls);
 	const maxTokens = positiveOr(policy.maxTokens, DEFAULT_BUDGET.maxTokens);
-	const startedAt = now();
+	let startedAt = now();
 	let toolCalls = 0;
 	let tokensUsed = 0;
 
@@ -96,7 +100,19 @@ export function createBudget(policy: BudgetPolicy = {}, now: () => number = () =
 		exceeded: wall,
 
 		snapshot() {
-			return { toolCalls, tokens: tokensUsed, elapsedMs: now() - startedAt };
+			return { toolCalls, tokens: tokensUsed, elapsedMs: now() - startedAt, startedAt };
+		},
+
+		restore(snapshot) {
+			if (typeof snapshot.toolCalls === "number" && snapshot.toolCalls >= 0) {
+				toolCalls = Math.max(toolCalls, Math.floor(snapshot.toolCalls));
+			}
+			if (typeof snapshot.tokens === "number" && snapshot.tokens >= 0) {
+				tokensUsed = Math.max(tokensUsed, Math.floor(snapshot.tokens));
+			}
+			if (typeof snapshot.startedAt === "number" && Number.isFinite(snapshot.startedAt)) {
+				startedAt = snapshot.startedAt;
+			}
 		},
 	};
 }
