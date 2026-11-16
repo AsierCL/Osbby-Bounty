@@ -10,7 +10,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, readdir, writeFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 
-export type FindingState = "candidate" | "verified" | "disputed" | "reported" | "duplicate" | "rejected";
+export type FindingState = "candidate" | "verified" | "disputed" | "reported" | "duplicate" | "rejected" | "dismissed";
 
 export type Confidence = "low" | "medium" | "high";
 
@@ -42,10 +42,10 @@ export interface Finding {
 }
 
 const ALLOWED: Record<FindingState, FindingState[]> = {
-	candidate: ["verified", "rejected"],
+	candidate: ["verified", "rejected", "dismissed"],
 	// S76: a valid NO_REPRODUCIDO over a verified finding disputes it; only the operator resolves that.
-	verified: ["reported", "duplicate", "rejected", "disputed"],
-	disputed: ["verified", "reported", "rejected"],
+	verified: ["reported", "duplicate", "rejected", "disputed", "dismissed"],
+	disputed: ["verified", "reported", "rejected", "dismissed"],
 	reported: [],
 	duplicate: [],
 	rejected: [],

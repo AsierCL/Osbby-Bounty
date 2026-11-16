@@ -129,3 +129,12 @@ necesitás una sesión autenticada, se usan cookies de un navegador ya logueado 
 o se escribe la contraseña en el navegador, nunca como argumento.
 
 Una contraseña en argv es un registro permanente a cambio de nada.
+
+## Infraestructura interna y rutas no documentadas
+
+Llegar a infraestructura interna o a rutas no documentadas **a través de un servicio que reenvía** (path
+traversal, `actuator/health`, `actuator/env`, `debug`, `__admin`, equivalentes) es su propia clase
+destructiva: `infra-probing-via-proxy`. Pausa siempre.
+
+Y **no hereda ninguna autorización previa**: que el humano haya aprobado "probar las mutaciones" no dice
+nada sobre sondear el backend. Cada acción de esta clase pide su propia confirmación, con su propio texto.

@@ -162,3 +162,16 @@ Ya está anotado como hipótesis en `docs/DEUDA.md`: la extensión registra las 
 la identidad ni el protocolo** (`assets/identity.md`, `assets/protocol.md`) en el system prompt de la
 sesión. Un agente sin ese encuadre tiende a explorar. No lo cambié todavía: primero quiero tu
 resultado, para no arreglar a ciegas.
+
+## La ruta del alcance, siempre absoluta
+
+`bounty_scope` acepta rutas relativas y las resuelve contra el directorio de la sesión, pero la forma
+segura es **la ruta absoluta**:
+
+```
+bounty_scope file="/ruta/completa/work/acme/scope.yaml"
+```
+
+Desde dentro de `work/acme`, `work/acme/scope.yaml` apunta a `work/acme/work/acme/scope.yaml` y falla. Si
+ves un error de lectura, el mensaje te muestra la ruta absoluta que intentó y la que probablemente
+querías.

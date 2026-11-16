@@ -84,3 +84,22 @@ vas a pensar que está roto. Poné 2 y anotá el motivo (punto 3).
 
 Cada uno devuelve un mensaje con la línea. Si el mensaje no alcanza, `bin/gentle-bounty --preflight
 <programa>` te dice qué chequeo falla antes de arrancar.
+
+## Límites de volumen (S89)
+
+En `limits`, junto a `rate_rps`:
+
+| Campo | Por defecto | Qué significa |
+|---|---|---|
+| `rate_rps` | sin declarar (y sin declarar no corre nada) | ritmo, compartido por todas las sesiones del programa |
+| `max_requests_per_host` | **300** | ejecuciones reales contra un host dentro de una corrida; al llegar, deniega ese host y la sesión puede seguir con otros |
+
+## Presupuesto en `.bounty/config.json` (S89)
+
+| Clave | Por defecto | Por qué |
+|---|---|---|
+| `max_tool_calls` | **500** | una noche de trabajo metódico, no una corrida corta |
+| `max_duration_hours` | **8** | red de seguridad, no el límite principal: generoso a propósito |
+| `max_tokens` | **25 000 000** | ~50k tokens por llamada × 500, con margen |
+
+El presupuesto por volumen manda; el reloj solo evita una sesión desbocada.

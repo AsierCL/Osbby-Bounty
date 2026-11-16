@@ -157,6 +157,12 @@ export function renderStatus(input: {
 	lines.push("## Qué sigue");
 	lines.push("");
 	lines.push(state.nextStep || NEXT_PHASE[state.phase]);
+	const dismissed = findings.filter((finding) => finding.state === "dismissed");
+	if (dismissed.length > 0) {
+		lines.push("", "## Descartados por criterio humano");
+		lines.push("");
+		for (const finding of dismissed) lines.push(`- ${finding.id} — ${finding.title}: resuelto por tu criterio, no por el verificador.`);
+	}
 	const disputed = findings.filter((finding) => finding.state === "disputed");
 	if (disputed.length > 0) {
 		lines.push("", "## Disputas (las resolvés vos)");

@@ -7,6 +7,8 @@
  * false negative crosses red line #2.
  */
 
+import { isInternalAddress } from "./ip-safety.ts";
+
 export const DESTRUCTIVE_TECHNIQUES = new Set([
 	"dos",
 	"ddos",
@@ -40,6 +42,36 @@ const DANGEROUS_TAGS = /(^|,)\s*(dos|fuzz|fuzzing|intrusive|brute|bruteforce|spr
  * detected by name. Only the general shape counts.
  */
 const DATA_FLAGS = new Set(["-d", "--data", "--data-raw", "--data-binary", "--data-urlencode", "--json"]);
+
+/**
+ * S91: reaching internal infrastructure or undocumented routes through something that forwards to a
+ * backend (path traversal, actuator/health/env, debug endpoints). It is its own class, it ALWAYS pauses,
+ * and it never inherits an authorization given earlier in the session: approving "test the mutations"
+ * says nothing about probing a backend.
+ */
+const TRAVERSAL = /(?:\.\.\/|%2e%2e(?:%2f|\/)|%252e%252e|\.\.%5c|%5c\.\.)/i;
+const INTERNAL_ROUTES = /(?:\/actuator(?:\/|$)|\/actuator\/(?:env|health|heapdump|threaddump|mappings|configprops)|\/env\b|\/heapdump|\/threaddump|\/management\/(?:health|env|info)|\/__admin|\/debug\b|\/server-status|\/internal\/|\/admin\/(?:env|config|status)|\/wp-json\/wp\/v2\/users|\/console\b|\/jolokia)/i;
+
+export function infraProbing(args: string[], target: string): string | null {
+	// The path can arrive in the target, in a URL argument, in a query value, or URL-encoded.
+	const haystack = `${target} ${args.join(" ")}`;
+	const traversal = TRAVERSAL.exec(haystack);
+	if (traversal !== null) return `path traversal (${traversal[0]})`;
+	const route = INTERNAL_ROUTES.exec(haystack);
+	if (route !== null) return `undocumented internal route (${route[0]})`;
+	// A parameter that carries a destination pointing at an internal address: the SSRF shape a forwarding
+	// service turns into a request to somewhere the scope never allowed. Only embedded destinations count,
+	// not the target of a normal lab request (127.0.0.1 is the lab itself).
+	for (const match of haystack.matchAll(/(?:url|target|dest|destination|next|redirect|callback|webhook|fetch|proxy)\s*=\s*([^&\s"']+)/gi)) {
+		const value = decodeURIComponent((match[1] ?? "").replace(/^\/+/, ""));
+		const host = /^(?:[a-z][a-z0-9+.-]*:)?\/\/([^/?#]+)/i.exec(value)?.[1] ?? value.split(/[/?#]/)[0] ?? "";
+		const address = host.replace(/^\[|\]$/g, "").split(":")[0] ?? "";
+		if (address.length > 0 && isInternalAddress(address)) return `forwarded destination to an internal address (${address})`;
+	}
+	// A proxy-style request that carries an absolute internal URL in a header or parameter.
+	if (/\/(?:proxy|forward|fetch|relay|gateway)\?[^\s]*(?:url|target|dest|next)=/i.test(haystack)) return "forwarding endpoint with an embedded destination";
+	return null;
+}
 const HEADER_FLAGS = new Set(["-H", "--header"]);
 const GRAPHQL_CONTENT_TYPE = /^application\/(?:json|graphql)/i;
 const GRAPHQL_COMMENT = /#[^\n]*/g;
@@ -165,6 +197,15 @@ export function classifyDestructive(input: DestructiveInput): DestructiveVerdict
 	if (input.args.some((arg) => /rate[-_]?limit\s*[=\s]?0\b/i.test(arg))) {
 		strong.push("rate limited to zero means no limit");
 		classes.push("fuzzing-flood");
+	}
+
+	// S91: infrastructure probing through a proxy pauses on its own, whatever was authorized before.
+	const probing = infraProbing(input.args, targetPath);
+	if (probing !== null) {
+		strong.push(
+			`intento de alcanzar infraestructura interna o una ruta no documentada a través de un servicio que reenvía: ${probing}. Esto no hereda ninguna autorización previa de la sesión`,
+		);
+		classes.push("infra-probing-via-proxy");
 	}
 
 	// S81/task 2: every GraphQL mutation is state-changing until a human says otherwise.

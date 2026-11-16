@@ -36,6 +36,8 @@ export interface ProgramConfig {
 	program: string;
 	redaction?: RedactionMode;
 	budget?: BudgetPolicy;
+	/** S91: used to resolve a relative scope path (and to suggest the absolute one). */
+	cwd?: string;
 	/** D1: identity of this session, used in chain records. Set by the runner for children. */
 	sessionId?: string;
 	/** Task 7: the runner's per-invocation token. When set, execution records are signed. */
@@ -329,10 +331,19 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 		async scope(input) {
 			await mkdir(workspace, { recursive: true });
 			let text: string;
+			// S91: a relative path is resolved against the session's working directory instead of
+			// failing with a bare ENOENT; the error names the absolute path it tried and the one it
+			// suggests.
+			const { isAbsolute, resolve } = await import("node:path");
+			const absolute = isAbsolute(input.file) ? input.file : resolve(deps.cwd ?? process.cwd(), input.file);
 			try {
-				text = await deps.readFile(input.file);
+				text = await deps.readFile(absolute);
 			} catch (error) {
-				return { ok: false, text: `No pude leer el alcance ${input.file}: ${(error as Error).message}` };
+				const suggested = resolve(deps.cwd ?? process.cwd(), "work", config.program, "scope.yaml");
+				return {
+					ok: false,
+					text: `No pude leer el alcance ${absolute}: ${(error as Error).message}. Usá una ruta absoluta; la de este programa suele ser ${suggested}.`,
+				};
 			}
 			const parsed = parseScope(text);
 			if (!parsed.ok) {
@@ -751,6 +762,27 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 		},
 
 		async finding(input) {
+			if (input.action === "resolve") {
+				if (!input.id) return { ok: false, text: "Para resolver por criterio necesito id." };
+				const reason = (input.reason ?? "").trim();
+				if (reason.length === 0) return { ok: false, text: "Para resolver por criterio necesito un motivo escrito: queda en la ficha del hallazgo." };
+				const finding = await findings.get(input.id);
+				if (!finding) return { ok: false, text: `No existe el hallazgo ${input.id}.` };
+				const resolved = resolveConfirm({ env: deps.env, lab: true, uiConfirm: input.confirm ?? deps.confirm });
+				if (resolved.source !== "ui") {
+					return {
+						ok: false,
+						text: "Resolver por criterio exige tu confirmación en el diálogo: sin tu tecla no se mueve nada (y no hay atajo por chat).",
+					};
+				}
+				const approved = await resolved.confirm(
+					`Resolver ${finding.id} (${finding.title}) como dismissed, por criterio humano.\n\nMotivo: ${reason}\n\n¿Confirmás? Esto no es un veredicto del verificador: es tu criterio.`,
+				);
+				if (!approved) return { ok: false, text: `No resolví ${finding.id}: no confirmaste en el diálogo.` };
+				const updated = await findings.update(finding.id, { state: "dismissed" }, `criterio humano: ${reason}`);
+				await refresh("Hallazgo resuelto por criterio humano.");
+				return { ok: true, text: `${updated.id} quedó en dismissed por criterio humano. Motivo: ${reason}` };
+			}
 			if (input.action === "create") {
 				if (!input.title || !input.class || !input.endpoint) return { ok: false, text: "Para crear un hallazgo necesito title, class y endpoint." };
 				const { finding, duplicateOf } = await findings.create({

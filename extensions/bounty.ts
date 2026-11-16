@@ -20,6 +20,7 @@ import { buildDomainPrompt } from "../src/pi/prompt.ts";
 import { createPiRunner } from "../src/pi/runner.ts";
 import { verifierTaskFor, parseVerdict } from "../src/pi/verifier.ts";
 import { createEvidenceStore } from "../src/core/evidence.ts";
+import { extractJsonArray } from "../src/core/json-extract.ts";
 import type { BountyPhase } from "../src/core/status.ts";
 import type { RedactionMode } from "../src/core/redact.ts";
 
@@ -316,31 +317,35 @@ export default function bountyExtension(pi: PiLike): void {
 	pi.registerTool({
 		name: "bounty_finding",
 		label: "Bounty finding",
-		description: "Create, update or list findings. States: candidate → verified → reported | duplicate | rejected.",
+		description:
+			"Create, update, list, or resolve a finding by human criterion. States: candidate → verified → reported | duplicate | rejected | dismissed | disputed. resolve requires the human's dialog and a written reason; it is not a verifier verdict.",
 		parameters: {
 			type: "object",
 			additionalProperties: false,
 			properties: {
 				program: { type: "string" },
-				action: { type: "string", enum: ["create", "update", "list"] },
+				action: { type: "string", enum: ["create", "update", "list", "resolve"] },
 				id: { type: "string" },
 				title: { type: "string" },
 				class: { type: "string" },
 				endpoint: { type: "string" },
 				parameter: { type: "string" },
-				state: { type: "string", enum: ["candidate", "verified", "disputed", "reported", "duplicate", "rejected"] },
+				state: { type: "string", enum: ["candidate", "verified", "disputed", "reported", "duplicate", "rejected", "dismissed"] },
 				confidence: { type: "string", enum: ["low", "medium", "high"] },
 				sensitive: { type: "boolean" },
 				reason: { type: "string" },
 			},
 			required: ["program", "action"],
 		} as never,
-		async execute(_toolCallId, params) {
+		async execute(_toolCallId, params, _signal, _update, context) {
 			const resolved = resolveProgram(params.program);
 			if (!resolved.ok) return text(resolved.text, { ok: false });
 			const session = await sessionFor(resolved.program);
+			const confirm = humanAsk(context as UiContext | undefined, "Resolver por criterio", "Esto no es un veredicto del verificador: es tu criterio, y queda escrito.");
 			const result = await session.finding({
-				action: params.action as "create" | "update" | "list",
+				action: params.action as "create" | "update" | "list" | "resolve",
+				...(confirm === undefined ? {} : { confirm }),
+				...(process.env.GENTLE_BOUNTY_NIGHT_MODE === "1" ? {} : {}),
 				...(params.id === undefined ? {} : { id: String(params.id) }),
 				...(params.title === undefined ? {} : { title: String(params.title) }),
 				...(params.class === undefined ? {} : { class: String(params.class) }),
@@ -508,19 +513,11 @@ export default function bountyExtension(pi: PiLike): void {
 				env: { GENTLE_BOUNTY_ROOT: root, GENTLE_BOUNTY_PROGRAM: resolved.program },
 				timeoutMs: 10 * 60 * 1000,
 			});
-			const start = result.output.indexOf("[");
-			const end = result.output.lastIndexOf("]");
-			if (start < 0 || end <= start) return text(`El anotador no devolvió JSON legible. Salida: ${result.output.slice(0, 200)}`, { ok: false });
-			let parsed: unknown;
-			try {
-				parsed = JSON.parse(result.output.slice(start, end + 1));
-			} catch (error) {
-				return text(`El anotador devolvió JSON inválido: ${(error as Error).message}`, { ok: false });
-			}
-			const list = Array.isArray(parsed) ? parsed : [];
+			// S91: models repeat their answer; take the last complete array instead of failing.
+			const list = extractJsonArray<Record<string, unknown>>(result.output);
+			if (list === null) return text(`El anotador no devolvió un array JSON legible. Salida: ${result.output.slice(0, 200)}`, { ok: false });
 			const written: string[] = [];
-			for (const entry of list) {
-				const record = entry as Record<string, unknown>;
+			for (const record of list) {
 				if (typeof record.id !== "string") continue;
 				const item = pending.find((candidate) => candidate.id === record.id);
 				if (item === undefined) continue;
