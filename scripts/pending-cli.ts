@@ -70,8 +70,25 @@ if (!scoped.ok) {
 for (const item of items) {
 	console.log("");
 	console.log(summary(item));
-	const answer = dry ? "n" : (await rl.question("¿Ejecutar esta acción? [s/N] ")).trim().toLowerCase();
-	if (answer !== "s" && answer !== "si" && answer !== "sí") {
+	const answer = dry ? "n" : (await rl.question("[e]jecutar · [d]escartar por criterio · [s]altar — tu tecla: ")).trim().toLowerCase();
+	if (answer === "d" && !dry) {
+		const reason = (await rl.question("Motivo (tus palabras, queda citado tal cual): ")).trim();
+		if (reason.length === 0) {
+			console.log("   → sin motivo no se descarta.");
+			continue;
+		}
+		const resolvedFinding = await session.finding({
+			action: "resolve",
+			id: item.id,
+			reason,
+			reasonSource: "human-verbatim",
+			confirm: async () => true,
+		});
+		await queue.resolve(item.id, { at: new Date().toISOString(), outcome: resolvedFinding.ok ? "discarded" : "declined", detail: resolvedFinding.text.slice(0, 300) });
+		console.log(`   → ${resolvedFinding.ok ? "descartado por criterio" : "no se descartó"}`);
+		continue;
+	}
+	if (answer !== "e" && answer !== "sí" && answer !== "si") {
 		if (!dry) await queue.resolve(item.id, { at: new Date().toISOString(), outcome: "declined", detail: "sin confirmación en la terminal" });
 		console.log("   → no se ejecuta.");
 		continue;

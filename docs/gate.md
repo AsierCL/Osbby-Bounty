@@ -61,6 +61,17 @@ lineal del programa.
 
 **Estado: aplazada.** No bloquea fases D ni E. Se corrige cuando convenga.
 
+## Resolución por criterio: solo con la palabra del humano (S92)
+
+`dismissed` existe para una decisión humana, no para un veredicto mecánico. Por eso `resolve` exige
+`reasonSource: "human-verbatim"`: el motivo tiene que ser **texto literal del humano, citado tal cual**.
+Un motivo que el agente redactó o resumió por su cuenta se rechaza aunque el canal diga ser el humano.
+
+La comprobación de procedencia no puede ser criptográfica: el código verifica la declaración
+(`human-verbatim`), la confirmación (diálogo de la sesión o tu terminal en `--pending`) y deja el motivo
+entero en la transición del hallazgo. Si el motivo es una paráfrasis, es el humano quien tiene que
+notarlo en el texto citado; el estado es auditable precisamente por eso.
+
 ## CNAME, CDN y la IP final (S87)
 
 Un host en scope que resuelve por CNAME a infraestructura compartida (`www.thefork.com` →

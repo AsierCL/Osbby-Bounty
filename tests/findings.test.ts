@@ -107,3 +107,44 @@ test("S81: renaming a finding keeps its state and adds no transition", () =>
 		assert.equal(renamed.transitions.length, finding.transitions.length);
 		assert.equal(renamed.fingerprint, finding.fingerprint, "renaming must not change identity");
 	}));
+
+test("S92: a resolution written by the agent is refused; only a verbatim human reason is accepted", async () => {
+	const { createSession } = await import("../src/pi/session.ts");
+	const { mkdtemp, mkdir, readFile, rm, writeFile } = await import("node:fs/promises");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	const dir = await mkdtemp(join(tmpdir(), "bounty-resolve-"));
+	try {
+		await mkdir(join(dir, "work", "lab"), { recursive: true });
+		const scopePath = join(dir, "scope.yaml");
+		await writeFile(scopePath, "program: lab\nlab: true\nauthorized_on: 2026-01-01\nin_scope:\n  - 127.0.0.1:3000\nlimits:\n  rate_rps: 5\n", "utf8");
+		const session = createSession(
+			{ root: dir, program: "lab" },
+			{ dns: async () => ({ cname: [] }), readFile: (path) => readFile(path, "utf8"), runTool: async () => ({ exitCode: 0, stdout: "", stderr: "" }), confirm: async () => false },
+		);
+		await session.scope({ file: scopePath, confirm: async () => true });
+		const created = await session.finding({ action: "create", title: "x", class: "idor", endpoint: "/x" });
+		const id = (created.text.match(/F-\d{4}/) ?? [])[0] as string;
+
+		const fromAgent = await session.finding({ action: "resolve", id, reason: "lo resumo yo", reasonSource: "agent", confirm: async () => true });
+		assert.equal(fromAgent.ok, false);
+		assert.match(fromAgent.text, /citado textualmente del humano/);
+
+		const noSource = await session.finding({ action: "resolve", id, reason: "sin declarar", confirm: async () => true });
+		assert.equal(noSource.ok, false);
+
+		// A session with no UI at all: the criterion resolution is refused, whatever the channel says.
+		const headless = createSession(
+			{ root: dir, program: "lab" },
+			{ dns: async () => ({ cname: [] }), readFile: (path) => readFile(path, "utf8"), runTool: async () => ({ exitCode: 0, stdout: "", stderr: "" }) },
+		);
+		const noUi = await headless.finding({ action: "resolve", id, reason: "texto literal del humano", reasonSource: "human-verbatim" });
+		assert.equal(noUi.ok, false);
+		assert.match(noUi.text, /exige tu confirmación en el diálogo/);
+
+		const ok = await session.finding({ action: "resolve", id, reason: "texto literal del humano", reasonSource: "human-verbatim", confirm: async () => true });
+		assert.equal(ok.ok, true, ok.text);
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});

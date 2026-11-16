@@ -334,6 +334,7 @@ export default function bountyExtension(pi: PiLike): void {
 				confidence: { type: "string", enum: ["low", "medium", "high"] },
 				sensitive: { type: "boolean" },
 				reason: { type: "string" },
+				reason_source: { type: "string", enum: ["human-verbatim", "agent"] },
 			},
 			required: ["program", "action"],
 		} as never,
@@ -352,6 +353,7 @@ export default function bountyExtension(pi: PiLike): void {
 				...(params.endpoint === undefined ? {} : { endpoint: String(params.endpoint) }),
 				...(params.parameter === undefined ? {} : { parameter: String(params.parameter) }),
 				...(params.state === undefined ? {} : { state: params.state as "candidate" }),
+				...(params.reason_source === undefined ? {} : { reasonSource: params.reason_source as "human-verbatim" | "agent" }),
 				...(params.confidence === undefined ? {} : { confidence: params.confidence as "medium" }),
 				...(params.sensitive === undefined ? {} : { sensitive: params.sensitive === true }),
 				...(params.reason === undefined ? {} : { reason: String(params.reason) }),
@@ -496,6 +498,10 @@ export default function bountyExtension(pi: PiLike): void {
 			const tools = (/^tools:\s*(.+)$/m.exec(asset)?.[1] ?? "").split(",").map((tool) => tool.trim()).filter(Boolean);
 			const pending = await session.pendingQueue.pending();
 			if (pending.length === 0) return text("No hay acciones destructivas pendientes: no hay nada que anotar.", { ok: true });
+			// S92: the annotator must know whether this is a lab; on a real program, approve is the
+			// exception and hold is the default.
+			const scopeText = await readFile(join(root, "work", resolved.program, "scope.yaml"), "utf8").catch(() => "");
+			const isLab = /^lab:\s*true\s*$/m.test(scopeText);
 			const runner = createPiRunner({
 				piCommand: process.env.GENTLE_BOUNTY_PI ? [process.env.GENTLE_BOUNTY_PI] : ["pi"],
 				extensionEntry: fileURLToPath(import.meta.url),
@@ -508,6 +514,9 @@ export default function bountyExtension(pi: PiLike): void {
 					`Archivo: ${session.pendingQueue.file()}`,
 					'Forma: [{"id":"P-0001","risk":"low|medium|high","touchesThirdPartyData":true|false,"financialEffect":true|false,"whatCouldHappen":"...","recommendation":"approve|hold|discard","note":"..."}]',
 					"Tu salida es una OPINIÓN para que el humano decida más rápido, nunca una aprobación. No ejecutes nada.",
+					isLab
+						? "Este programa está marcado lab: true (laboratorio propio)."
+						: "Este programa NO es un laboratorio (lab: false): la recomendación por defecto es hold; approve solo si tu nota justifica explícitamente por qué es tan inofensiva como una de laboratorio.",
 				].join("\n"),
 				cwd: root,
 				env: { GENTLE_BOUNTY_ROOT: root, GENTLE_BOUNTY_PROGRAM: resolved.program },

@@ -766,13 +766,20 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				if (!input.id) return { ok: false, text: "Para resolver por criterio necesito id." };
 				const reason = (input.reason ?? "").trim();
 				if (reason.length === 0) return { ok: false, text: "Para resolver por criterio necesito un motivo escrito: queda en la ficha del hallazgo." };
+				// S92: a decision-only state needs the human's own words, not the agent's summary.
+				if (input.reasonSource !== "human-verbatim") {
+					return {
+						ok: false,
+						text: "Resolver por criterio exige un motivo citado textualmente del humano (reasonSource: \"human-verbatim\"). Un motivo redactado o resumido por el agente no habilita este estado, ni siquiera si el canal dice ser el humano.",
+					};
+				}
 				const finding = await findings.get(input.id);
 				if (!finding) return { ok: false, text: `No existe el hallazgo ${input.id}.` };
 				const resolved = resolveConfirm({ env: deps.env, lab: true, uiConfirm: input.confirm ?? deps.confirm });
 				if (resolved.source !== "ui") {
 					return {
 						ok: false,
-						text: "Resolver por criterio exige tu confirmación en el diálogo: sin tu tecla no se mueve nada (y no hay atajo por chat).",
+						text: "Resolver por criterio exige tu confirmación en el diálogo (o tu terminal en --pending): sin tu tecla no se mueve nada (y no hay atajo por chat).",
 					};
 				}
 				const approved = await resolved.confirm(
