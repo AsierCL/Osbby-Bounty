@@ -279,6 +279,8 @@ export default function bountyExtension(pi: PiLike): void {
 				target: String(params.target),
 				confirm,
 				...(params.technique === undefined ? {} : { technique: String(params.technique) }),
+				...(typeof params.burst === "number" ? { burst: params.burst } : {}),
+				...(params.mass_assignment === true ? { massAssignment: true } : {}),
 				...(params.method === undefined ? {} : { method: String(params.method) }),
 				...(params.follow_redirects === undefined ? {} : { followRedirects: params.follow_redirects === true }),
 			});

@@ -13,6 +13,9 @@ hace "para ver".
 | [SSTI](ssti.md) | entradas que se renderizan en plantillas |
 | [LFI](lfi.md) | parámetros que parecen leer archivos |
 | [SSRF](ssrf.md) | URLs que el servidor busca por vos |
+| [Race conditions](race-conditions.md) | ráfagas controladas para cupones/stock/saldo |
+| [GraphQL](graphql.md) | introspección, campos sensibles y batching |
+| [BOLA y verbos](bola-verb-change.md) | acceso a recurso ajeno por cambio de verbo/ruta |
 
 Antes de decir "no hay nada": buscá anomalías (tiempo, longitud, código, mensaje). Una diferencia
 reproducible es una hipótesis; dos, un hallazgo.

@@ -21,6 +21,7 @@ import { gate, isHttpInvocation, type DnsResolver, type GateRequest } from "../c
 import type { Limiter, Reservation } from "../core/ratelimit.ts";
 import { createSharedRateLimiter } from "../core/shared-ratelimit.ts";
 import { createPendingQueue, type PendingQueue } from "../core/pending.ts";
+import { injectMassAssignment, normalizeBurst } from "../core/mutation-helpers.ts";
 import { seedSessionHeaders } from "../core/session-seed.ts";
 import { requestViewForModel, responseViewForModel, type RedactionMode } from "../core/redact.ts";
 import { describeRequiredHeaders, parseScope, evaluate, summarizeScope, type ScopePolicy } from "../core/scope.ts";
@@ -221,8 +222,23 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 		await refresh("Estoy atascado: no sigo con variaciones del mismo bloqueo. Necesito tu decisión para continuar.");
 	}
 
-	/** Returns a refusal when this block is the fifth in a row with the same cause. */
-	async function noteBlock(key: string): Promise<ToolResult | null> {
+	/**
+	 * S90: the loop detector is per BRANCH. Five identical signatures on the same route abandon that
+	 * route and tell the agent to pivot; the session keeps working on other functionality.
+	 */
+	const branches = new Map<string, { count: number; signature: string }>();
+
+	/** Returns a refusal when this branch is the fifth in a row with the same cause. */
+	async function noteBlock(key: string, endpoint = ""): Promise<ToolResult | null> {
+		if (endpoint.length > 0) {
+			const current = branches.get(endpoint);
+			const count = current !== undefined && current.signature === key ? current.count + 1 : 1;
+			branches.set(endpoint, { count, signature: key });
+			if (count < 5) return null;
+			await status.note(`loop-detected: ${endpoint} — ${count} bloqueos idénticos (${key}). Rama abandonada; pivotá a otra funcionalidad.`);
+			await refresh(`Rama abandonada por bucle (${endpoint}). Sigo con otra funcionalidad.`);
+			return { ok: false, text: `loop-detected en ${endpoint}: ${count} bloqueos seguidos con "${key}". Abandono esa rama; pivotá a otra funcionalidad o a otro endpoint.` };
+		}
 		if (stuck !== null) {
 			return { ok: false, text: `La sesión está atascada (${stuck.key}, ${stuck.count} veces). No ejecuto nada más hasta que decidas algo: cambiá de enfoque o cerrá el programa.` };
 		}
@@ -232,8 +248,10 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 		return { ok: false, text: `Cinco bloqueos seguidos por el mismo motivo (${key}): paro sola. Quedó anotado en ${status.file()}. No insisto con variaciones de lo mismo.` };
 	}
 
-	function noteSuccess(): void {
+	function noteSuccess(endpoint?: string): void {
 		streak = null;
+		// A success on a route clears its loop count: the branch recovered.
+		if (endpoint !== undefined) branches.delete(endpoint);
 	}
 
 	const pending = createPendingQueue({ dir: workspace, now });
@@ -429,6 +447,21 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			if (stuck !== null) {
 				return { ok: false, text: `La sesión está atascada (${stuck.key}, ${stuck.count} veces): no ejecuto nada más hasta que decidas algo.` };
 			}
+			// S90: a branch that already looped five times is abandoned before spending another request.
+			const earlyEndpoint = (() => {
+				try {
+					return new URL(input.target).pathname;
+				} catch {
+					return "";
+				}
+			})();
+			const earlyBranch = earlyEndpoint.length > 0 ? branches.get(earlyEndpoint) : undefined;
+			if (earlyBranch !== undefined && earlyBranch.count >= 5) {
+				return {
+					ok: false,
+					text: `loop-detected en ${earlyEndpoint}: ya hubo ${earlyBranch.count} bloqueos idénticos ("${earlyBranch.signature}"). Esa rama está abandonada; pivotá a otra funcionalidad o a otro endpoint.`,
+				};
+			}
 			let current: ScopePolicy;
 			try {
 				current = requirePolicy();
@@ -442,8 +475,10 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			const rawArgs = input.args[0] === input.tool ? input.args.slice(1) : input.args;
 			// S97: the human's session travels in a private config file, never in argv. The required
 			// headers still have to come from -H in argv, so seeding cannot hide a missing User-Agent.
-			const seed = await seedSessionHeaders({ workspace, tool: input.tool, args: rawArgs });
-			const args = seed === null ? rawArgs : seed.args;
+			// S90: mass assignment is explicit and recorded: the tool shows which keys it added.
+			const injected = input.massAssignment === true ? injectMassAssignment(rawArgs) : { args: rawArgs, added: [] as string[], body: null };
+			const seed = await seedSessionHeaders({ workspace, tool: input.tool, args: injected.args });
+			const args = seed === null ? injected.args : seed.args;
 			const argv = [input.tool, ...args];
 			const request: GateRequest = {
 				target: input.target,
@@ -641,17 +676,89 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				if (!reservation.allowed) {
 					await status.note(`frenado por ritmo: ${reservation.reason}`);
 					await refresh();
-					const blocked = await noteBlock(`rate: ${reservation.reason}`);
+					const blocked = await noteBlock(`rate: ${reservation.reason}`, new URL(input.target).pathname);
 					return blocked ?? { ok: false, text: `Frenado por el límite del programa: ${reservation.reason}` };
 				}
 				if (reservation.delayMs > 0) await new Promise((resolve) => setTimeout(resolve, reservation.delayMs));
 			}
 
 			const primaryHost = decision.contacts[0]?.host ?? "unknown";
+			const burst = normalizeBurst(input.burst);
+
+			// S90: a controlled burst of identical requests, for race-condition testing. Each request
+			// reserves its own slot in the program's rate, and every one is in the chain.
+			if (burst > 1) {
+				const perHostCapBurst = current.limits.maxRequestsPerHost ?? MAX_PER_HOST_DEFAULT;
+				const usedBurst = hostCounts.get(primaryHost) ?? 0;
+				if (usedBurst + burst > perHostCapBurst) {
+					const blocked = await noteBlock(`per-host cap on ${primaryHost}`, new URL(input.target).pathname);
+					return blocked ?? {
+						ok: false,
+						text: `La ráfaga de ${burst} no entra en el tope por host (${usedBurst}/${perHostCapBurst}). Probá menos o esperá otra corrida.`,
+					};
+				}
+				hostCounts.set(primaryHost, usedBurst + burst);
+				const burstId = randomUUID();
+				const endpointPath = new URL(input.target).pathname;
+				const outcomes = await Promise.all(
+					Array.from({ length: burst }, async (_unused, index) => {
+						if (limiter !== null) {
+							const reservation = await limiter.reserve(primaryHost);
+							if (!reservation.allowed) return { index, denied: reservation.reason };
+							if (reservation.delayMs > 0) await new Promise((resolve) => setTimeout(resolve, reservation.delayMs + Math.floor(Math.random() * 15)));
+						} else {
+							await new Promise((resolve) => setTimeout(resolve, Math.floor(Math.random() * 15)));
+						}
+						const at = new Date(now()).toISOString();
+						const burstArgv = [input.tool, ...args];
+						await evidence.append({
+							kind: "execution",
+							payload: {
+								tool: input.tool,
+								argv: burstArgv,
+								contacts: decision.contacts,
+								technique: input.technique ?? null,
+								endpoint: endpointPath,
+								at,
+								burstId,
+								burstIndex: index,
+								burstSize: burst,
+								sessionId,
+							},
+						});
+						let execution: ToolExecution;
+						try {
+							execution = await deps.runTool(burstArgv);
+						} catch (error) {
+							await evidence.append({ kind: "execution-error", payload: { tool: input.tool, burstId, error: (error as Error).message } });
+							return { index, error: (error as Error).message };
+						}
+						await evidence.append({ kind: "execution-result", payload: { tool: input.tool, burstId, burstIndex: index, exitCode: execution.exitCode, stdout: execution.stdout, stderr: execution.stderr } });
+						return { index, execution };
+					}),
+				);
+				const ok = outcomes.filter((outcome) => "execution" in outcome && outcome.execution?.exitCode === 0).length;
+				const lines = outcomes.map((outcome) => {
+					if ("denied" in outcome) return `#${outcome.index}: denegado (${String(outcome.denied).slice(0, 60)})`;
+					if ("error" in outcome) return `#${outcome.index}: error (${String(outcome.error).slice(0, 60)})`;
+					const execution = outcome.execution as ToolExecution;
+					const status = /(\d{3})\s*$/.exec(execution.stdout.trim())?.[1] ?? "?";
+					return `#${outcome.index}: ${status} (${execution.stdout.length} bytes)`;
+				});
+				await refresh(`Ráfaga de ${burst} contra ${primaryHost}: ${ok} con éxito.`);
+				return {
+					ok: ok > 0,
+					text: [
+						`Ráfaga de ${burst} peticiones idénticas contra ${primaryHost} (burstId ${burstId.slice(0, 8)}…), una reserva de ritmo por petición.`,
+						...lines,
+						`La cadena tiene cada petición por separado (burstIndex).`,
+					].join("\n"),
+				};
+			}
 			const perHostCap = current.limits.maxRequestsPerHost ?? MAX_PER_HOST_DEFAULT;
 			const used = hostCounts.get(primaryHost) ?? 0;
 			if (used >= perHostCap) {
-				const blocked = await noteBlock(`per-host cap on ${primaryHost}`);
+				const blocked = await noteBlock(`per-host cap on ${primaryHost}`, new URL(input.target).pathname);
 				return (
 					blocked ?? {
 						ok: false,
@@ -681,6 +788,8 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 					at: executionAt,
 					// S97: names only. The values live in the private config file.
 					...(seed === null ? {} : { seededHeaders: seed.headers, seededConfig: seed.configPath }),
+					// S90: mass assignment is evidence, not a silent mutation.
+					...(injected.added.length === 0 ? {} : { massAssignmentKeys: injected.added }),
 					sessionId,
 					// Task 7: signed with the token the runner gave this session, if any.
 					...(invocationToken === null ? {} : { signature: signExecution(invocationToken, { sessionId, tool: input.tool, argv, endpoint, at: executionAt }) }),
@@ -707,8 +816,8 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			const httpStatus = statusMatch?.[1] ?? null;
 			const antiBot = /captcha-delivery|datadome|cf-challenge|perimeterx|hcaptcha|recaptcha/i.exec(execution.stdout);
 			if (execution.exitCode === 0 && (httpStatus === null || (/^[23]/.test(httpStatus) && antiBot === null))) {
-				noteSuccess();
-			} else if (httpStatus === "403" || httpStatus === "429" || antiBot !== null) {
+				noteSuccess(endpoint);
+			} else if (httpStatus === "403" || httpStatus === "429" || /^[45]/.test(httpStatus ?? "") || antiBot !== null || execution.exitCode !== 0) {
 				// S97: name the barrier and point at the surface that does work, instead of grinding.
 				const waf = /x-datadome|captcha-delivery/i.test(execution.stdout)
 					? "DataDome"
@@ -723,7 +832,8 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 					);
 					await refresh("WAF: pivoteo a otra superficie en vez de insistir.");
 				}
-				await noteBlock(`http:${httpStatus ?? "?"}:${waf?.toLowerCase() ?? antiBot?.[0]?.toLowerCase() ?? "no-marker"}`);
+				const signature = execution.exitCode !== 0 ? `exit:${execution.exitCode}` : `http:${httpStatus ?? "?"}:${waf?.toLowerCase() ?? antiBot?.[0]?.toLowerCase() ?? "no-marker"}`;
+				await noteBlock(signature, endpoint);
 			}
 
 			const viewed = responseViewForModel(

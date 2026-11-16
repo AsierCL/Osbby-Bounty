@@ -220,3 +220,33 @@ Límites que no cambian:
 Si el target devuelve un muro (403 con `x-datadome`, `cf-challenge`), la sesión se anota en `status.md`
 como "Infraestructura protegida (WAF)" y el agente pivota a la superficie que acepta la sesión o a la API
 que no dispara el reto. No se resuelven captchas ni se rota la identidad del cliente.
+
+## Modo maratón: sesiones nocturnas y concurrentes (S90)
+
+Presupuestos por volumen (`.bounty/config.json`): `max_tool_calls` 500, `max_duration_hours` 8,
+`max_tokens` 25M. Tope por host en el scope: `limits.max_requests_per_host` (300 por defecto).
+
+Para correr **varios programas en paralelo**:
+
+```bash
+bin/gentle-bounty atg &        # una terminal
+bin/gentle-bounty thefork &    # otra
+```
+
+Lo que ya está probado con dos procesos: las cadenas de evidencia de programas distintos no se pisan, dos
+sesiones del **mismo** programa serializan su escritura y **comparten el ritmo** (el limitador vive junto
+al programa, no en el proceso). Si dos sesiones usan el mismo programa, el `rate_rps` se reparte, no se
+duplica.
+
+Ráfagas controladas (`bounty_run` con `burst: N`, máximo 12): N peticiones idénticas en paralelo, cada una
+reservando su lugar en el ritmo, cada una en la cadena con su `burstIndex` y un `burstId` común. Sirve para
+race conditions en cupones, stock o saldos. Si el gate clasifica la acción como destructiva, la pausa
+humana sigue mandando.
+
+Mass assignment (`mass_assignment: true`): el arnés mezcla en el cuerpo JSON un conjunto documentado de
+claves de escalada (`isAdmin`, `role`, `verified`, `isStaff`, `permissions`, `emailVerified`) y registra
+en la evidencia **qué claves agregó**.
+
+Ramas y bucles: cinco firmas idénticas seguidas (403/429/404/5xx/timeout o marca de WAF) en la misma ruta
+abandonan **esa rama** con `loop-detected` en `status.md`. La sesión sigue con otras rutas; no se queda
+insistiendo.
