@@ -14,6 +14,8 @@ literal:
 | el apex también | agregá `acme.com` aparte (el wildcard no lo cubre) |
 | salvo `admin.acme.com` | `out_of_scope: ["admin.acme.com"]` |
 | solo `api.acme.com:8443` | `api.acme.com:8443` (puerto incluido) |
+| `*.acme.com` solo por HTTPS | `*.acme.com:443` (el wildcard también acepta puerto) |
+| cualquier puerto de los subdominios | `*.acme.com` (sin puerto: cubre todos) |
 | 5 req/s | `limits.rate_rps: 5` |
 | "no DoS ni fuerza bruta" | `limits.forbidden: [dos, brute-force]` |
 | header obligatorio (exacto) | `required_headers: { X-Bounty-Id: "...-..." }` |

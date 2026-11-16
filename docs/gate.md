@@ -48,18 +48,20 @@ agrega ahí.
 
 Host-shaped token que sí parsea y está fuera de alcance ⇒ **se deniega**. Es la línea roja #1.
 
-## Limitación conocida: un wildcard no está calificado por puerto (S25, aplazada)
+## Wildcards y puertos: permisos aditivos, no "la regla más específica gana" (S25, aclarado en S102)
 
-`*.acme.com` cubre **todos** los puertos de todos los nombres que matchea. Si el programa dice
-`*.acme.com`, entonces `api.acme.com:9999` está en alcance por esa regla, y una regla
-`api.acme.com:8443` no lo restringe (agregar permisos no quita permisos). Para restringir un puerto
-hay que no otorgar el host por wildcard.
+Un wildcard **sí** puede llevar puerto: `*.acme.com:443` cubre solo 443 de los subdominios que matchea,
+y `*.acme.com` (sin puerto) cubre **todos** los puertos.
 
-Se eligió así porque refleja cómo las plataformas describen el alcance y porque el matcher
-alternativo ("la regla más específica gana") vuelve imposible razonar sobre el scope con la lectura
-lineal del programa.
+Lo que no existe es el matcher de "la regla más específica gana": las reglas **suman permisos**, no los
+quitan. Con `*.acme.com` y `api.acme.com:8443` en `in_scope`, `api.acme.com:9999` sigue permitido por el
+wildcard: la regla más específica no lo restringe. Para limitar el puerto hay que **no** otorgar el host
+por wildcard, o acotar el wildcard con puerto.
 
-**Estado: aplazada.** No bloquea fases D ni E. Se corrige cuando convenga.
+Se eligió así porque refleja cómo las plataformas describen el alcance y porque el matcher alternativo
+vuelve imposible razonar sobre el scope con la lectura lineal del programa.
+
+**Estado: no es un bug; es semántica documentada.**
 
 ## Resolución por criterio: solo con la palabra del humano (S92)
 
