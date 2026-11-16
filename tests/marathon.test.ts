@@ -114,3 +114,18 @@ test("five identical blocks on one route abandon that branch and let other route
 		await h.cleanup();
 	}
 });
+
+test("S99: five identical error bodies with no status code also abandon the branch", async () => {
+	const h = await setup(() => ({ exitCode: 0, stdout: "not found", stderr: "" }));
+	try {
+		for (let index = 0; index < 5; index += 1) {
+			await h.session.run({ tool: "curl", args: ["-sS", "http://127.0.0.1:3000/missing"], target: "http://127.0.0.1:3000/missing" });
+		}
+		const sixth = await h.session.run({ tool: "curl", args: ["-sS", "http://127.0.0.1:3000/missing"], target: "http://127.0.0.1:3000/missing" });
+		assert.equal(sixth.ok, false);
+		assert.match(sixth.text, /loop-detected/);
+		assert.equal(h.calls.length, 5, "the sixth attempt must not execute");
+	} finally {
+		await h.cleanup();
+	}
+});

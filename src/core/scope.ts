@@ -100,6 +100,7 @@ const TOP_LEVEL_KEYS = new Set([
 const LIMIT_KEYS = new Set([
 	"rate_rps",
 	"max_requests_per_day",
+	"max_requests_per_host",
 	"forbidden",
 	"allowed_methods",
 	"redirects",

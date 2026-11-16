@@ -815,9 +815,12 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			const statusMatch = /(?:^|\s)(\d{3})\s*$/.exec(execution.stdout.trim()) ?? /^HTTP\/[\d.]+\s+(\d{3})/m.exec(execution.stdout);
 			const httpStatus = statusMatch?.[1] ?? null;
 			const antiBot = /captcha-delivery|datadome|cf-challenge|perimeterx|hcaptcha|recaptcha/i.exec(execution.stdout);
-			if (execution.exitCode === 0 && (httpStatus === null || (/^[23]/.test(httpStatus) && antiBot === null))) {
+			// S99: a plain `curl -sS` returns no status code, so a 404 body looked like a success and the
+			// loop detector never fired. A repeated recognizable error body counts as a block signal.
+			const errorBody = httpStatus === null ? /\b(not found|forbidden|unauthorized|bad request|internal server error|blocked)\b|"error"\s*:/i.exec(execution.stdout) : null;
+			if (execution.exitCode === 0 && errorBody === null && (httpStatus === null || (/^[23]/.test(httpStatus) && antiBot === null))) {
 				noteSuccess(endpoint);
-			} else if (httpStatus === "403" || httpStatus === "429" || /^[45]/.test(httpStatus ?? "") || antiBot !== null || execution.exitCode !== 0) {
+			} else if (httpStatus === "403" || httpStatus === "429" || /^[45]/.test(httpStatus ?? "") || antiBot !== null || errorBody !== null || execution.exitCode !== 0) {
 				// S97: name the barrier and point at the surface that does work, instead of grinding.
 				const waf = /x-datadome|captcha-delivery/i.test(execution.stdout)
 					? "DataDome"
@@ -832,7 +835,10 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 					);
 					await refresh("WAF: pivoteo a otra superficie en vez de insistir.");
 				}
-				const signature = execution.exitCode !== 0 ? `exit:${execution.exitCode}` : `http:${httpStatus ?? "?"}:${waf?.toLowerCase() ?? antiBot?.[0]?.toLowerCase() ?? "no-marker"}`;
+				const signature =
+					execution.exitCode !== 0
+						? `exit:${execution.exitCode}`
+						: `http:${httpStatus ?? "?"}:${waf?.toLowerCase() ?? antiBot?.[0]?.toLowerCase() ?? errorBody?.[0]?.toLowerCase() ?? "no-marker"}`;
 				await noteBlock(signature, endpoint);
 			}
 

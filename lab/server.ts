@@ -74,6 +74,20 @@ export async function startLab(port = 0): Promise<Lab> {
 			return;
 		}
 
+		// S99: echoes back the JSON body it received, so a mass-assignment probe can be verified
+		// against what the server actually read (never a real profile, just an echo).
+		if (path === "/api/profile" && (req.method === "POST" || req.method === "PUT" || req.method === "PATCH")) {
+			let raw = "";
+			req.on("data", (chunk) => {
+				raw += String(chunk);
+			});
+			req.on("end", () => {
+				res.writeHead(200, { "content-type": "application/json" });
+				res.end(JSON.stringify({ received: raw.length > 0 ? JSON.parse(raw) : null }));
+			});
+			return;
+		}
+
 		if (path === "/login") {
 			res.writeHead(401, { "content-type": "application/json" });
 			res.end(JSON.stringify({ error: "invalid credentials" }));

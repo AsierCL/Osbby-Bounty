@@ -260,6 +260,8 @@ export default function bountyExtension(pi: PiLike): void {
 				technique: { type: "string", description: "Optional class, for example idor or dos." },
 				method: { type: "string" },
 				follow_redirects: { type: "boolean" },
+				burst: { type: "number", description: "Controlled burst of identical requests (1-12) for race-condition testing; each request reserves the program's rate." },
+				mass_assignment: { type: "boolean", description: "Merge documented escalation keys into a JSON body and record which keys were added." },
 			},
 			required: ["program", "tool", "args", "target"],
 		} as never,
