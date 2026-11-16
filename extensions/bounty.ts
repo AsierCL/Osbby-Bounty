@@ -512,7 +512,7 @@ export default function bountyExtension(pi: PiLike): void {
 				task: [
 					"Leé la cola de acciones destructivas pendientes y anotá cada ítem. Devolvé SOLO un array JSON, sin texto alrededor.",
 					`Archivo: ${session.pendingQueue.file()}`,
-					'Forma: [{"id":"P-0001","risk":"low|medium|high","touchesThirdPartyData":true|false,"financialEffect":true|false,"irreversible":true|false,"whatCouldHappen":"...","recommendation":"approve|hold|discard","note":"..."}]',
+					'Forma: [{"id":"P-0001","risk":"low|medium|high","touchesThirdPartyData":"no|yes|plausible","financialEffect":"no|yes|plausible","irreversible":true|false,"whatCouldHappen":"...","recommendation":"approve|hold|discard","note":"..."}]',
 					"Tu salida es una OPINIÓN para que el humano decida más rápido, nunca una aprobación. No ejecutes nada.",
 					isLab
 						? "Este programa está marcado lab: true (laboratorio propio)."
@@ -533,8 +533,8 @@ export default function bountyExtension(pi: PiLike): void {
 				await session.pendingQueue.annotate(record.id, {
 					at: new Date().toISOString(),
 					risk: record.risk === "high" || record.risk === "medium" ? record.risk : "low",
-					touchesThirdPartyData: record.touchesThirdPartyData === true,
-					financialEffect: record.financialEffect === true,
+					touchesThirdPartyData: triState(record.touchesThirdPartyData),
+					financialEffect: triState(record.financialEffect),
 					irreversible: record.irreversible === true,
 					whatCouldHappen: String(record.whatCouldHappen ?? ""),
 					recommendation: record.recommendation === "approve" || record.recommendation === "discard" ? record.recommendation : "hold",

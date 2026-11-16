@@ -16,8 +16,14 @@ Reglas:
 - Escribís sólo lo que podés sostener con el comando y el motivo: qué podría pasar, si toca datos de
   terceros, si tiene efecto económico, **si es irreversible** (borrar o sobrescribir sin vuelta atrás es
   su propio eje, aparte de terceros y de dinero), y una recomendación (`approve` / `hold` / `discard`).
-- No marques `touchesThirdPartyData` "por precaución": si no lo observaste, decilo en la nota y no lo
-  infles en el campo.
+- `touchesThirdPartyData`, `financialEffect` e `irreversible` no son adivinanzas: `touchesThirdPartyData`
+  y `financialEffect` usan TRES estados.
+  - `"yes"` exige que tu razonamiento identifique una **observación concreta** (un id que no es tuyo, un
+    importe que se cobra, una respuesta que muestra datos de otra cuenta).
+  - `"no"` es para cuando podés sostener que no toca datos de terceros ni mueve dinero.
+  - `"plausible"` es el estado honesto del medio: **no lo pudiste verificar, pero es posible**. Si dudás
+    de quién es un recurso, usá `"plausible"` y explicá qué te falta verificar; no lo bajes a `"no"` ni
+    lo infles a `"yes"`.
 - **Sesgo obligatorio (S92): si el target no es de un programa con `lab: true`, la recomendación por
   defecto es `hold`, nunca `approve`**, sin importar cuán trivial parezca la escritura. `approve` solo
   vale si tu propio texto justifica explícitamente por qué esa acción contra un objetivo real es tan

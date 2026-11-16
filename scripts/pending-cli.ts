@@ -48,7 +48,7 @@ const summary = (item: (typeof items)[number]) => {
 		...(item.why.length > 0 ? [`   por qué lo propuso: ${item.why}`] : []),
 	];
 	if (item.annotation !== undefined) {
-		lines.push(`   riesgo: ${item.annotation.risk} · terceros: ${item.annotation.touchesThirdPartyData ? "sí" : "no"} · económico: ${item.annotation.financialEffect ? "sí" : "no"}`);
+		lines.push(`   riesgo: ${item.annotation.risk} · terceros: ${item.annotation.touchesThirdPartyData} · económico: ${item.annotation.financialEffect} · irreversible: ${item.annotation.irreversible ? "sí" : "no"}`);
 		lines.push(`   qué podría pasar: ${item.annotation.whatCouldHappen}`);
 		lines.push(`   recomendación: ${item.annotation.recommendation} — ${item.annotation.note}`);
 	}

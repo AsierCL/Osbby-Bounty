@@ -9,6 +9,9 @@
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+/** S94: a flag that can say "I could not verify it, but it is plausible" instead of forcing false. */
+export type TriState = "no" | "yes" | "plausible";
+
 export interface PendingItem {
 	/** Stable id: P-0001, P-0002 … */
 	id: string;
@@ -25,8 +28,12 @@ export interface PendingItem {
 	annotation?: {
 		at: string;
 		risk: "low" | "medium" | "high";
-		touchesThirdPartyData: boolean;
-		financialEffect: boolean;
+		/**
+		 * S94: three states instead of a false-by-default boolean. "yes" needs an identified concrete
+		 * observation; "plausible" is the honest middle ("no lo pude verificar, pero es posible").
+		 */
+		touchesThirdPartyData: TriState;
+		financialEffect: TriState;
 		/** S93: deletion/overwrite with no way back is its own axis, separate from data or money. */
 		irreversible: boolean;
 		whatCouldHappen: string;
