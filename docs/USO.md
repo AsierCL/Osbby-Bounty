@@ -192,3 +192,31 @@ work/<programa>/
 ├── evidence/     ← log encadenado por hash + puntero de cabeza
 └── reports/      ← reportes generados
 ```
+## Cómo aportar una sesión humana al agente (S97)
+
+Algunos programas (TheFork/DataDome) bloquean el login automatizado pero permiten operar si **vos** hacés
+el login y le pasás la sesión a la herramienta.
+
+1. Iniciá sesión en tu navegador, como siempre.
+2. Copiá las cabeceras de tu sesión a `work/<programa>/session.headers`, una por línea:
+
+```
+Cookie: datadome=…; thefork-session=…
+Authorization: Bearer eyJ…
+```
+
+3. Nada más. En cada llamada HTTP con `curl`, el arnés escribe un archivo privado (0600) en
+   `work/<programa>/.session/curl.conf` y lo pasa con `-K`. **El valor de la cookie y el token nunca
+   entran en argv ni en la cadena de evidencia**: se registran solo los nombres de las cabeceras inyectadas
+   y la ruta del archivo.
+
+Límites que no cambian:
+
+- La sesión inyectada **no** satisface los `required_headers` del programa: el User-Agent sigue teniendo
+  que ir por `-H` en argv, como exige el scope.
+- Una sesión no autoriza a tocar nada fuera del alcance: el gate valida hosts igual que siempre.
+- El archivo es del operador. El agente no lo crea, no lo edita y no debe imprimir su contenido.
+
+Si el target devuelve un muro (403 con `x-datadome`, `cf-challenge`), la sesión se anota en `status.md`
+como "Infraestructura protegida (WAF)" y el agente pivota a la superficie que acepta la sesión o a la API
+que no dispara el reto. No se resuelven captchas ni se rota la identidad del cliente.

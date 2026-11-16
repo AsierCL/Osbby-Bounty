@@ -21,6 +21,7 @@ import { gate, isHttpInvocation, type DnsResolver, type GateRequest } from "../c
 import type { Limiter, Reservation } from "../core/ratelimit.ts";
 import { createSharedRateLimiter } from "../core/shared-ratelimit.ts";
 import { createPendingQueue, type PendingQueue } from "../core/pending.ts";
+import { seedSessionHeaders } from "../core/session-seed.ts";
 import { requestViewForModel, responseViewForModel, type RedactionMode } from "../core/redact.ts";
 import { describeRequiredHeaders, parseScope, evaluate, summarizeScope, type ScopePolicy } from "../core/scope.ts";
 import { scoreVector } from "../core/cvss.ts";
@@ -438,7 +439,11 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			// S78/task 2: `args` is what the tool receives, never the tool name. A model that repeats the
 			// tool inside args once produced `curl curl …`, and curl fetched both positionally: the gate
 			// validated both (it validates every host-shaped token), but the recorded argv lied.
-			const args = input.args[0] === input.tool ? input.args.slice(1) : input.args;
+			const rawArgs = input.args[0] === input.tool ? input.args.slice(1) : input.args;
+			// S97: the human's session travels in a private config file, never in argv. The required
+			// headers still have to come from -H in argv, so seeding cannot hide a missing User-Agent.
+			const seed = await seedSessionHeaders({ workspace, tool: input.tool, args: rawArgs });
+			const args = seed === null ? rawArgs : seed.args;
 			const argv = [input.tool, ...args];
 			const request: GateRequest = {
 				target: input.target,
@@ -674,6 +679,8 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 					technique: input.technique ?? null,
 					endpoint,
 					at: executionAt,
+					// S97: names only. The values live in the private config file.
+					...(seed === null ? {} : { seededHeaders: seed.headers, seededConfig: seed.configPath }),
 					sessionId,
 					// Task 7: signed with the token the runner gave this session, if any.
 					...(invocationToken === null ? {} : { signature: signExecution(invocationToken, { sessionId, tool: input.tool, argv, endpoint, at: executionAt }) }),
@@ -702,7 +709,21 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			if (execution.exitCode === 0 && (httpStatus === null || (/^[23]/.test(httpStatus) && antiBot === null))) {
 				noteSuccess();
 			} else if (httpStatus === "403" || httpStatus === "429" || antiBot !== null) {
-				await noteBlock(`http:${httpStatus ?? "?"}:${antiBot?.[0]?.toLowerCase() ?? "no-marker"}`);
+				// S97: name the barrier and point at the surface that does work, instead of grinding.
+				const waf = /x-datadome|captcha-delivery/i.test(execution.stdout)
+					? "DataDome"
+					: /cf-ray|cf-challenge|cloudflare/i.test(execution.stdout)
+						? "Cloudflare"
+						: /x-sucuri|sucuri/i.test(execution.stdout)
+							? "Sucuri"
+							: null;
+				if (waf !== null) {
+					await status.note(
+						`Infraestructura protegida (WAF: ${waf}) en ${endpoint}. Pivotá a la superficie que acepta la sesión inyectada (work/${config.program}/session.headers) o a la API que no dispara el reto.`,
+					);
+					await refresh("WAF: pivoteo a otra superficie en vez de insistir.");
+				}
+				await noteBlock(`http:${httpStatus ?? "?"}:${waf?.toLowerCase() ?? antiBot?.[0]?.toLowerCase() ?? "no-marker"}`);
 			}
 
 			const viewed = responseViewForModel(
