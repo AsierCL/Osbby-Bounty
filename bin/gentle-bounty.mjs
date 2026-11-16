@@ -218,11 +218,6 @@ async function main(argv) {
 		if (passthroughIndex >= 0 && index > passthroughIndex) return false;
 		return true;
 	});
-	const program = positional[0];
-	if (!program) {
-		console.error("usage: gentle-bounty <program> [--check] [--probe <file>] [-- <pi args>]");
-		process.exit(2);
-	}
 	// S89/S90: read-only summaries.
 	if (argv.includes("--morning")) {
 		const { morningReport } = await import("../scripts/lib/morning.ts");
@@ -241,6 +236,12 @@ async function main(argv) {
 		process.exit(child.status ?? 1);
 	}
 
+	const program = positional[0];
+	if (!program) {
+		console.error("usage: gentle-bounty <program> [--check] [--probe <file>] [-- <pi args>]");
+		console.error("        gentle-bounty --morning | --preflight <programa> | --pending <programa>");
+		process.exit(2);
+	}
 	const preflightIndex = argv.indexOf("--preflight");
 	if (preflightIndex >= 0) {
 		const target = argv[preflightIndex + 1];
