@@ -257,7 +257,10 @@ function parseRule(raw: string): { ok: true; rule: ScopeRule } | { ok: false; er
 	}
 
 	if (hostPart === "*" || hostPart === "*." || hostPart === ".*") {
-		return { ok: false, error: `bare wildcard rule ${JSON.stringify(raw)} is not allowed` };
+		return {
+			ok: false,
+			error: `bare wildcard rule ${JSON.stringify(raw)} is not allowed: a rule is a host (optionally with port and path); "everything else" is already denied because only in_scope hosts are allowed`,
+		};
 	}
 	const hostStars = (hostPart.match(/\*/g) ?? []).length;
 	if (hostStars > 1) return { ok: false, error: `wildcard rule ${JSON.stringify(raw)} has more than one "*"` };
@@ -324,6 +327,10 @@ function asString(node: Node | undefined, key: string, errors: string[]): string
 function asList(node: Node | undefined, key: string, errors: string[]): string[] | null {
 	if (node === undefined) return null;
 	if (!Array.isArray(node)) {
+		if (typeof node === "string" && node.trim().length === 0) {
+			errors.push(`${key} is empty: remove the key, or list at least one entry`);
+			return null;
+		}
 		errors.push(`${key}: expected a list, got ${typeof node === "string" ? JSON.stringify(node) : "a map"}`);
 		return null;
 	}

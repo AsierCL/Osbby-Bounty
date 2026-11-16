@@ -102,7 +102,12 @@ async function preflight(program, root) {
 	} else {
 		const parsed = parseScope(readFileSync(scopePath, "utf8"));
 		if (!parsed.ok) {
-			fail(`el scope no parsea: ${parsed.errors.slice(0, 3).join("; ")}`);
+			fail(`el scope no parsea: ${parsed.errors[0] ?? "error desconocido"}`);
+			for (const error of parsed.errors.slice(1)) lines.push(`      ${error}`);
+			for (const error of parsed.errors) {
+				if (/is empty/i.test(error)) lines.push(`      pista: la clave está vacía porque no tiene ninguna entrada; borrala o agregá al menos un host.`);
+				else if (/bare wildcard/i.test(error)) lines.push(`      pista: "*/" no es un host; in_scope ya limita, así que no hace falta excluir "todo lo demás".`);
+			}
 		} else {
 			policy = parsed.policy;
 			ok(`el scope parsea y declara lab: ${parsed.policy.lab}`);
@@ -169,7 +174,10 @@ async function preflight(program, root) {
 		const config = await loadGlobalConfig(async (path) => readFileSync(path, "utf8"), join(root, ".bounty", "config.json"));
 		const budget = config.budget ?? {};
 		if (Object.keys(budget).length === 0) {
-			warn("no hay presupuesto configurado en .bounty/config.json: se usan los defaults (45 min, 40 llamadas, 2M tokens)");
+			const { DEFAULT_BUDGET } = await import("../src/pi/budget.ts");
+			warn(
+				`no hay presupuesto configurado en .bounty/config.json: se usan los defaults (${DEFAULT_BUDGET.maxWallMs / 3_600_000} h, ${DEFAULT_BUDGET.maxToolCalls} llamadas, ${DEFAULT_BUDGET.maxTokens / 1_000_000}M tokens)`,
+			);
 		} else {
 			ok(`presupuesto configurado: ${JSON.stringify(budget)}`);
 		}

@@ -43,7 +43,10 @@ test("a wildcard without a port says it covers every port", () => {
 
 test("no out_of_scope, missing rate and an imprudent rate each get a warning", () => {
 	const noOut = preflightScope(BASE.replace(/out_of_scope:\n  - staging\.acme\.com\n/, ""));
-	assert.match(noOut.warnings.join(" "), /no declara nada fuera de alcance/);
+	// S101: with concrete hosts in in_scope the absence of out_of_scope is not a warning-worthy gap.
+	assert.match(noOut.warnings.join(" "), /no hace falta: con hosts explícitos en in_scope/);
+	const wildcard = preflightScope(BASE.replace("- acme.com", "- *.acme.com").replace(/out_of_scope:\n  - staging\.acme\.com\n/, ""));
+	assert.match(wildcard.warnings.join(" "), /agregá out_of_scope si algún subdominio/);
 	const noRate = preflightScope(BASE.replace("  rate_rps: 2\n", ""));
 	assert.match(noRate.warnings.join(" "), /no declara limits\.rate_rps/);
 	const fast = preflightScope(BASE.replace("rate_rps: 2", "rate_rps: 40"));

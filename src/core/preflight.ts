@@ -31,7 +31,14 @@ export function preflightScope(text: string, options: { now?: () => number } = {
 			warnings.push(`la regla ${rule.raw} no fija puerto: cubre todos los puertos de los nombres que matchean`);
 		}
 	}
-	if (policy.outOfScope.length === 0) warnings.push("el programa no declara nada fuera de alcance: no puedo proteger nada que el alcance no excluya");
+	if (policy.outOfScope.length === 0) {
+		const concrete = policy.inScope.every((rule) => !rule.wildcard);
+		warnings.push(
+			concrete
+				? "no declara out_of_scope, y no hace falta: con hosts explícitos en in_scope, todo lo demás ya queda denegado"
+				: "el programa no declara nada fuera de alcance: agregá out_of_scope si algún subdominio del wildcard no está autorizado",
+		);
+	}
 	if (policy.limits.rateRps === null) warnings.push("el scope no declara limits.rate_rps: el gate va a 1 req/s por defecto");
 	else if (policy.limits.rateRps > PRUDENT_RPS) warnings.push(`el ritmo declarado (${policy.limits.rateRps} req/s) está por encima de lo prudente (${PRUDENT_RPS} req/s)`);
 	if (policy.lab === false) {
