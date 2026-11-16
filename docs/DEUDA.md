@@ -119,6 +119,21 @@ El preflight avisa: en este host `/usr/bin/httpx` es el **cliente HTTP de Python
 de Project Discovery. Si algún día se usa `httpx` como binario de recon, hay que verificar cuál está
 primero en el PATH. Hoy el flujo del lab usa `curl`, así que no afecta.
 
+## 11. Anotación de la cola: dos casos sin uso real (S95, abierto, nivel bajo)
+
+No bloquean operar; se resuelven con uso real, no con más casos sintéticos.
+
+1. **`financialEffect: "plausible"` en la práctica**: el campo y la regla existen, pero en las corridas
+   vistas apareció `"no"` o `"yes"`. Falta verlo aparecer con un importe que *podría* cobrarse y no se
+   pudo confirmar.
+2. **Colas viejas con booleanos**: el parser lee `true`/`false` como `yes`/`no`, cubierto por código,
+   pero no se corrió sobre un archivo real escrito antes de S94.
+3. **`approve` justificado en programa real**: no apareció todavía. Es lo esperable —la regla empuja
+   `hold`—, pero no está observado.
+
+Qué mirar cuando aparezca: si el anotador usa `"plausible"` sin que la nota explique qué falta
+verificar, o si una cola vieja muestra un booleano crudo en `--pending`.
+
 ## 9. El verificador firmaba con otro id (encontrado por el flujo vivo)
 
 El primer intento del flujo completo falló en el paso de aplicación: el veredicto era correcto

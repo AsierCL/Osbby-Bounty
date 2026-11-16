@@ -2033,3 +2033,14 @@ de protección del objetivo —anti-bot, captcha, WAF, rate-limiting real—, (b
 secreto en un lugar permanente e irreversible, y (c) cualquier cambio al gate, al runner o a las reglas de
 alcance, que se hace en otra sesión con revisión humana. Test en `domain-prompt` que verifica que el
 prompt compuesto las lleva. Nota espejo en `docs/USO.md`.
+
+### L38 — S95: ronda del anotador cerrada; tres pendientes anotados en DEUDA
+
+Cierre de la ronda de endurecimiento del anotador: el criterio de los tres estados (`no` / `yes` /
+`plausible`) con `irreversible` como campo propio se da por suficiente para operar, con la garantía
+explícita de que "la regla y el resultado van juntos".
+
+Sin unidades nuevas. Esta noche corren atg y thefork en modo nocturno con instrucciones dadas en sus
+propias sesiones. Los tres NO VERIFICADO (financialEffect plausible en la práctica, lectura de colas viejas
+con booleanos, approve justificado en programa real) quedan en `docs/DEUDA.md` §11 como deuda de nivel
+bajo, no bloqueante: se resuelven con uso real.
