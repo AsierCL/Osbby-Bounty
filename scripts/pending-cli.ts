@@ -77,15 +77,10 @@ for (const item of items) {
 			console.log("   → sin motivo no se descarta.");
 			continue;
 		}
-		const resolvedFinding = await session.finding({
-			action: "resolve",
-			id: item.id,
-			reason,
-			reasonSource: "human-verbatim",
-			confirm: async () => true,
-		});
-		await queue.resolve(item.id, { at: new Date().toISOString(), outcome: resolvedFinding.ok ? "discarded" : "declined", detail: resolvedFinding.text.slice(0, 300) });
-		console.log(`   → ${resolvedFinding.ok ? "descartado por criterio" : "no se descartó"}`);
+		// The human's words, quoted as typed. This resolves the QUEUE decision, not a finding:
+		// dismissing a finding goes through bounty_finding resolve inside a session.
+		await queue.resolve(item.id, { at: new Date().toISOString(), outcome: "discarded", detail: `motivo (texto literal del humano): ${reason}` });
+		console.log("   → descartado por criterio, con tu motivo guardado tal cual.");
 		continue;
 	}
 	if (answer !== "e" && answer !== "sí" && answer !== "si") {

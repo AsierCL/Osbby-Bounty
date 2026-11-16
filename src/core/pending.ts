@@ -27,6 +27,8 @@ export interface PendingItem {
 		risk: "low" | "medium" | "high";
 		touchesThirdPartyData: boolean;
 		financialEffect: boolean;
+		/** S93: deletion/overwrite with no way back is its own axis, separate from data or money. */
+		irreversible: boolean;
 		whatCouldHappen: string;
 		recommendation: "approve" | "hold" | "discard";
 		note: string;
