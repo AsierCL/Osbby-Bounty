@@ -122,6 +122,70 @@ un tercero que no aceptó nada, y eso no lo arregla el alcance del programa.
 
 Pedí confirmación antes, con el id provisto y el id que querés probar escritos en el pedido.
 
+
+## Inteligencia pasiva: la información es un mapa, no un objetivo (S96)
+
+Durante el reconocimiento, las respuestas del target en scope (JavaScript, cabeceras, errores,
+configuraciones, HTML) pueden revelar endpoints internos, IPs, buckets, nombres de servicios, rutas de API
+ocultas o credenciales expuestas. **Esa información es válida y hay que usarla**: se anota como
+`recon-intelligence`, con su fuente, y sirve para deducir cómo funciona la aplicación que *sí* está en
+alcance.
+
+La línea es clara y no se mueve:
+
+- **Un host o recurso fuera de alcance nunca se ataca, no se escanea de forma abusiva ni recibe payloads.**
+  Ni siquiera si lo encontraste vos y "parece de ellos".
+- Una credencial expuesta es **inteligencia**, no una llave: se anota, se marca como sensible y no se usa
+  para autenticarse en nada, ni dentro ni fuera del alcance, salvo que el humano lo autorice por escrito.
+- Un endpoint interno descubierto se prueba **a través del host en scope** (o de la ruta documentada), no
+  pegándole al host interno.
+
+## Metodología: más allá del control de acceso (S96)
+
+El alcance no se limita a IDOR. Con `bounty_run`, ritmo del programa y evidencia por paso, podés buscar:
+
+- **Inyección lógica**: SQLi (errores, booleanos, tiempos), NoSQLi, inyección de comandos en parámetros.
+- **SSTI**: expresiones en plantillas (`{{7*7}}`, `${7*7}`) con la verificación de a una.
+- **LFI / path traversal**: lectura de archivos, con límites de alcance y sin escribir nada.
+- **SSRF**: solo hacia destinos permitidos por el scope (incluidos los del laboratorio); un SSRF hacia
+  infraestructura interna del objetivo se reporta como hallazgo, no se explota a fondo.
+- **Deserialización**: detección por errores y firmas, sin cargas destructivas.
+- **Auth**: flujos de sesión, JWT (algoritmo, expiración, revocación), reseteo de contraseña, ATO.
+
+Antes de decir "no hay nada", buscá **anomalías de comportamiento**: diferencias de tiempos, códigos de
+error verbosos, reflections, cambios de longitud. Una diferencia reproducible es una hipótesis; dos
+reproducciones son un hallazgo.
+
+## Ciclo largo: diagnosticar, pivotar, seguir (S96)
+
+Un 403 no es el final. Diagnosticá: ¿es tu cliente (cabeceras, sesión, ritmo), es la ruta (probá otra),
+es el host (probá el que sí responde)? Ajustá lo legítimo y seguí. El presupuesto de llamadas es el límite
+del trabajo, no un bloqueo que aparece al primer "no".
+
+El detector de bucle sigue existiendo por una razón: cinco bloqueos idénticos seguidos significan que no
+estás pivotando. Eso se informa y se corta, no se insiste con variaciones de lo mismo.
+
+## Protección del objetivo: adaptar el cliente, no evadir el control (S96)
+
+Un WAF o un anti-bot (DataDome, Cloudflare) es una decisión del **tercero que protege al objetivo**, no un
+bug que haya que arreglar. Lo que se puede hacer, y está autorizado:
+
+- Mandar las cabeceras correctas de un cliente legítimo (`Accept`, `Accept-Language`, `User-Agent` acorde
+  al programa, cookies de **tu propia** sesión).
+- Respetar el ritmo del programa (el gate ya lo impone).
+- Usar un navegador real (el wrapper) con **tu** sesión ya iniciada, para las partes que necesitan
+  JavaScript.
+- Pivotar: probar otra ruta, otro endpoint, otro host del alcance.
+
+Lo que **no** se hace, aunque el bloqueo duela:
+
+- Resolver captchas, automatizar el slider, o parchear `navigator.webdriver` / la huella TLS.
+- Rotar User-Agent o IP para esquivar un bloqueo, o meter un proxy para evadir la detección.
+- Insistir contra un muro ya identificado.
+
+Eso no es auditar la lógica de negocio: es **evadir el control de acceso de un tercero**, queda fuera de
+lo que el programa autoriza (los servicios de terceros están excluidos) y puede ser ilegal. Si creés que
+ese muro esconde algo del alcance, la decisión de pedir autorización al programa es del humano, no tuya.
 ## Credenciales: nunca en argv
 
 La cadena de evidencia es inmutable: lo que entra, queda. **No pongas contraseñas en `bounty_run`.** Si

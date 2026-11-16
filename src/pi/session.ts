@@ -142,7 +142,7 @@ export interface ProgramSession {
 }
 
 /** Kinds the model may append itself (7b). Everything else is written by code. */
-export const MODEL_EVIDENCE_KINDS = new Set(["observation", "recon-note", "erratum"]);
+export const MODEL_EVIDENCE_KINDS = new Set(["observation", "recon-note", "recon-intelligence", "erratum"]);
 
 /** B4: the question must be hard to answer wrong: class first, full command, explicit labels. */
 export function confirmQuestion(

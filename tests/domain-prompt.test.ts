@@ -42,3 +42,14 @@ test("S89: the protocol says what to solve alone and the three obstacles that st
 	assert.match(prompt, /cambio al gate, al runner o a las reglas de alcance/);
 	assert.match(prompt, /nunca desde dentro de una corrida contra un objetivo real/);
 });
+
+test("S96: the protocol carries the autonomous posture and the evasion line", async () => {
+	const prompt = await buildDomainPrompt((path) => readFile(path, "utf8"), ASSETS);
+	assert.match(prompt, /Inteligencia pasiva: la información es un mapa, no un objetivo/);
+	assert.match(prompt, /nunca se ataca, no se escanea de forma abusiva ni recibe payloads/);
+	assert.match(prompt, /Metodología: más allá del control de acceso/);
+	assert.match(prompt, /[Aa]ntes de decir "no hay nada", buscá \*\*anomalías/);
+	assert.match(prompt, /adaptar el cliente, no evadir el control/);
+	assert.match(prompt, /Resolver captchas, automatizar el slider/);
+	assert.match(prompt, /Rotar User-Agent o IP para esquivar un bloqueo/);
+});

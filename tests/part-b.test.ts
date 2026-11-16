@@ -135,3 +135,22 @@ test("7b: an erratum must reference a real seq and shows next to it", async () =
 		await h.cleanup();
 	}
 });
+
+test("S96: recon-intelligence is evidence the model may write, separate from active attacks", async () => {
+	const h = await harness();
+	try {
+		const written = await h.session.evidence({
+			action: "append",
+			kind: "recon-intelligence",
+			payload: { source: "in-scope JS bundle", found: "bucket s3://acme-assets, endpoint /api/v2/internal/orders", use: "map only, not a target" },
+		});
+		assert.equal(written.ok, true, written.text);
+		const records = await h.store.read();
+		const record = records.filter((candidate) => candidate.kind === "recon-intelligence").at(-1);
+		assert.ok(record, "the record must exist");
+		// It is evidence, not execution: the chain must not contain any execution for it.
+		assert.equal(records.filter((candidate) => candidate.kind === "execution").length, 0);
+	} finally {
+		await h.cleanup();
+	}
+});
