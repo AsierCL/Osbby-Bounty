@@ -991,6 +991,18 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 		 * live subset (2xx/3xx/401/403) is handed to the agent. Both tools still go through the gate.
 		 */
 		async reconPipeline(input: { domain: string }): Promise<ToolResult> {
+			// S105: subfinder seeds with a domain, and the gate validates it like any host. Enumerating a
+			// name that is not in scope is not authorized, so say it plainly and name what can be used.
+			{
+				const seed = evaluate(policy as ScopePolicy, { host: input.domain });
+				if (seed.verdict !== "in") {
+					const usable = (policy as ScopePolicy | null)?.inScope.map((rule) => rule.raw).slice(0, 8).join(", ") ?? "";
+					return {
+						ok: false,
+						text: `No puedo enumerar ${input.domain}: el nombre semilla no está en scope (${seed.verdict === "out" ? `lo excluye la regla ${seed.rule}` : "ninguna regla in_scope lo cubre"}). Si el programa autoriza el dominio, agregalo a in_scope (o usá un wildcard); si no, la enumeración por ese nombre no corresponde. Reglas actuales: ${usable}.`,
+					};
+				}
+			}
 			const subdomains = await this.run({ tool: "subfinder", args: ["-d", input.domain, "-silent"], target: input.domain, reconTool: "subfinder" });
 			if (!subdomains.ok) return { ok: false, text: `subfinder no corrió: ${subdomains.text.split("\n")[0]}` };
 			const list = (await evidence.read())
@@ -998,12 +1010,31 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				.map((record) => record.payload as { tool?: string; entries?: { kind: string; value: string }[] })
 				.filter((payload) => payload.tool === "subfinder")
 				.at(-1)?.entries ?? [];
-			const hosts = list.filter((entry) => entry.kind === "host").map((entry) => entry.value);
-			if (hosts.length === 0) return { ok: true, text: "subfinder no devolvió subdominios: no hay fase 0 que filtrar." };
+			const discovered = list.filter((entry) => entry.kind === "host").map((entry) => entry.value);
+			if (discovered.length === 0) return { ok: true, text: "subfinder no devolvió subdominios: no hay fase 0 que filtrar." };
+			// S105: httpx with `-l` gets the whole file validated by the gate, so the list must be filtered
+			// FIRST: one out-of-scope name would block the entire probe. The scope decides what is probed.
+			const hosts: string[] = [];
+			const outOfScope: string[] = [];
+			for (const host of discovered) {
+				const verdict = evaluate(policy as ScopePolicy, { host });
+				if (verdict.verdict === "in") hosts.push(host);
+				else outOfScope.push(host);
+			}
+			if (hosts.length === 0) {
+				return { ok: true, text: `subfinder encontró ${discovered.length} nombre(s) y ninguno está en scope: no hay nada que probar (descartados: ${outOfScope.slice(0, 5).join(", ")}).` };
+			}
 			const listPath = join(workspace, "subdomains.txt");
 			await writeFile(listPath, hosts.join("\n") + "\n", "utf8");
 			const probeTarget = hosts[0] ?? input.domain;
-			const probed = await this.run({ tool: "httpx", args: ["-l", listPath, "-json", "-silent"], target: probeTarget, reconTool: "httpx" });
+			// S105: httpx is an HTTP client, so the program's required headers apply to it too. Send them
+			// from the scope (a contains-token becomes a plausible UA that includes it).
+			const requiredHeaderArgs: string[] = [];
+			for (const [name, required] of Object.entries(policy.requiredHeaders)) {
+				const value = required.mode === "contains" ? `Mozilla/5.0 (compatible; ${required.value})` : required.value;
+				requiredHeaderArgs.push("-H", `${name}: ${value}`);
+			}
+			const probed = await this.run({ tool: "httpx", args: ["-l", listPath, "-json", "-silent", ...requiredHeaderArgs], target: probeTarget, reconTool: "httpx" });
 			if (!probed.ok) return { ok: false, text: `httpx no corrió: ${probed.text.split("\n")[0]}` };
 			const httpxPayload = (await evidence.read())
 				.filter((record) => record.kind === "recon-intelligence")
@@ -1014,11 +1045,11 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			const alivePath = join(workspace, "alive-hosts.json");
 			await writeFile(alivePath, `${JSON.stringify(alive, null, 1)}\n`, "utf8");
 			await evidence.append({ kind: "recon-intelligence", payload: { tool: "phase-0", subdomains: hosts.length, alive: alive.length, entries: alive } });
-			await refresh(`Fase 0 lista: ${alive.length} host(s) vivos de ${hosts.length} subdominio(s).`);
+			await refresh(`Fase 0 lista: ${alive.length} host(s) vivos de ${hosts.length} en scope (${outOfScope.length} descartado(s) por scope).`);
 			return {
 				ok: true,
 				text: [
-					`Fase 0: ${hosts.length} subdominio(s) → ${alive.length} vivo(s) (2xx/3xx/401/403).`,
+					`Fase 0: ${discovered.length} subdominio(s) → ${hosts.length} en scope → ${alive.length} vivo(s) (2xx/3xx/401/403).`,
 					...alive.slice(0, 15).map((host) => `- ${host.status} ${host.url}${host.title === undefined ? "" : ` — ${host.title}`}`),
 					`El subconjunto limpio quedó en work/${config.program}/alive-hosts.json y como recon-intelligence.`,
 				].join("\n"),

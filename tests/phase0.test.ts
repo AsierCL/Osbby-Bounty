@@ -64,7 +64,7 @@ test("phase 0 runs subfinder then httpx and keeps only the live subset", async (
 		await session.scope({ file: scopePath, confirm: async () => true });
 		const result = await session.reconPipeline({ domain: "acme.com" });
 		assert.equal(result.ok, true, result.text);
-		assert.match(result.text, /3 subdominio\(s\) → 2 vivo\(s\)/);
+		assert.match(result.text, /3 subdominio\(s\) → 3 en scope → 2 vivo\(s\)/);
 		const alive = JSON.parse(await readFile(join(dir, "work", "lab", "alive-hosts.json"), "utf8")) as { url: string; status: number }[];
 		assert.deepEqual(alive.map((host) => host.status), [200, 403]);
 	} finally {
