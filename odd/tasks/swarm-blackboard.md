@@ -198,3 +198,19 @@ El espejo no se pudo escribir: `missing or unavailable contract (HTTP 404)`, esp
 - El espejo de este documento y el de `docs/DEUDA.md` siguen pendientes de Pi: este proceso cargó el
   entorno al arrancar y compara contra el binario 3.4.0. Se escribe en la próxima sesión con
   `ENGRAM_URL` o `ENGRAM_BIN` exportados.
+
+### L10 — Engram propio del bounty, dentro del repo
+
+```
+El engram del sistema es el que usas tu como gentle shell. En el de bounty, el engram es otro, y
+guarda todo en el directorio del bounty. ... Aqui debe vivir el docker compose, todo lo relacionado
+con la instalacion, la carpeta de engram, etc.
+```
+
+- `engram/`: compose (imagen pinneada, `serve`, host network, puerto 7438), `bin/engram-bounty`
+  (up/down/ensure/status/logs/cli), `bin/install.sh`, `data/` (gitignored), `README.md`.
+- `bin/gentle-bounty.mjs`: exporta `ENGRAM_URL=http://127.0.0.1:7438` (nunca hereda la del shell) y
+  hace `ensure` antes de abrir Pi; los subagentes lo heredan (`runner.ts` mergea `process.env`).
+- Verificado: `/health` 200 y `/runtime-contract` 200 en 7438, proyecto detectado `gentle-bounty`,
+  sesión y observación 201, visibles en 7438 y **ausentes** en 7437 (el del sistema), y
+  `bin/gentle-bounty acme --check` muestra `ENGRAM_URL=…7438`. Suite 491/491.

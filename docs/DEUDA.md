@@ -173,3 +173,13 @@ Dos condiciones más, verificadas en la prueba:
   devuelve `ambiguous project` y `project: ""`. El espejo quedó escrito con `project: "GentleBounty"`;
   para leerlo desde Pi hay que pasar ese proyecto explícito. Arreglo durable: detectar proyecto por el
   repo que corresponde, o fijar el proyecto en la config del plugin.
+
+## 13. Dos Engram: sistema (7437) y bounty (7438)
+
+El Engram del sistema es el del agente de desarrollo. La herramienta de bounty tiene el suyo, con su
+propio contenedor y su base dentro del repo (`engram/`, ver `engram/README.md`), porque mover
+`gentle-bounty/` tiene que llevarse la herramienta completa.
+
+`bin/gentle-bounty.mjs` exporta `ENGRAM_URL=http://127.0.0.1:7438` (nunca hereda la del shell), levanta
+el stack con `ensure` antes de abrir Pi, y los subagentes lo heredan vía `runner.ts`. Para apagarlo:
+`GENTLE_BOUNTY_ENGRAM=off`. La memoria del bounty no se mezcla con la del sistema: son bases distintas.

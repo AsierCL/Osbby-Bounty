@@ -296,6 +296,7 @@ work/<programa>/
 ├── state.json    ← fase y pendientes
 ├── board/        ← pizarra del enjambre (descubrimientos + leases)
 ├── jobs/         ← recon en segundo plano (estado por job)
+├── (el Engram del bounty vive en engram/data/, fuera de work/)
 ├── findings/     ← un JSON por hallazgo
 ├── evidence/     ← log encadenado por hash + puntero de cabeza
 └── reports/      ← reportes generados

@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Engram del bounty (runtime local en Docker, puerto propio).
+#   engram-bounty up | down | status | logs | cli <args>
+#   engram-bounty ensure   levanta sólo si no está sano (lo usa bin/gentle-bounty)
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO="$(cd "$HERE/.." && pwd)"
+COMPOSE=(docker compose -f "$HERE/docker-compose.yml")
+PORT="${ENGRAM_PORT:-7438}"
+URL="http://127.0.0.1:${PORT}"
+
+export ENGRAM_PORT
+export ENGRAM_WORKDIR="${ENGRAM_WORKDIR:-$REPO}"
+export ENGRAM_UID="${ENGRAM_UID:-$(id -u)}"
+export ENGRAM_GID="${ENGRAM_GID:-$(id -g)}"
+
+healthy() { curl -fsS "${URL}/health" >/dev/null 2>&1; }
+
+wait_health() {
+  for _ in $(seq 1 120); do
+    healthy && return 0
+    sleep 0.5
+  done
+  echo "engram-bounty: no respondió /health en ${URL}" >&2
+  echo "engram-bounty: revisá 'engram/bin/engram-bounty logs'" >&2
+  return 1
+}
+
+mkdir -p "$HERE/data"
+
+case "${1:-}" in
+  up)
+    "${COMPOSE[@]}" pull --quiet 2>/dev/null || true
+    "${COMPOSE[@]}" up -d
+    wait_health
+    echo "Engram del bounty listo en ${URL} (proyecto: $(basename "$ENGRAM_WORKDIR"))"
+    ;;
+  ensure)
+    if healthy; then
+      exit 0
+    fi
+    "${COMPOSE[@]}" up -d
+    wait_health
+    ;;
+  down)
+    "${COMPOSE[@]}" down --remove-orphans
+    echo "Engram del bounty bajado. Las memorias siguen en ${HERE}/data"
+    ;;
+  status)
+    curl -fsS "${URL}/health" || { echo "no corre en ${URL}"; exit 1; }
+    echo
+    curl -fsS "${URL}/project/current" | head -c 200 || true
+    echo
+    ;;
+  logs)
+    "${COMPOSE[@]}" logs --tail=120
+    ;;
+  cli)
+    shift
+    "${COMPOSE[@]}" run --rm --no-deps -T engram "$@"
+    ;;
+  *)
+    echo "uso: engram-bounty up|down|ensure|status|logs|cli <args>" >&2
+    exit 2
+    ;;
+esac
