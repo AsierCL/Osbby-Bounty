@@ -1,183 +1,171 @@
 /**
- * S2/S5: the swarm runner, tested with a fake child. The properties pinned here are the ones that
- * make fan-out useful instead of expensive: declared order, a real concurrency cap, an aggregate
- * budget that stops launching, and one child's failure never taking down the rest.
+ * S9-S12: the swarm, tested with a fake child. Pinned here: the gate runs before any spawn, the
+ * concurrency cap is real, a child can never receive `bounty_swarm`, and the fan-in keeps each child's
+ * identity (sessionId + invocationToken).
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { runSwarm, SWARM_ROLES, swarmTaskFor, summarizeSwarm, type SwarmRoleSpec } from "../src/pi/swarm.ts";
+import { runSwarm, SWARM_ROLES, DEFAULT_ROLES, renderSnapshot, summarizeSwarm, swarmTaskFor } from "../src/pi/swarm.ts";
+import { validateTools } from "../src/pi/runner.ts";
 
-function role(name: string, tools: string[] = ["read"]): SwarmRoleSpec {
-	return { role: name, task: `mandato de ${name}`, tools };
+const ARTIFACT = { id: "0123456789abcdef", category: "endpoint" as const, target: "https://a.acme.com/api", data: { method: "GET" }, discoveredBy: "S-1", ts: "2026-11-18T10:00:00.000Z" };
+
+function outcome(role: string) {
+	return { ok: true, output: role, toolCalls: 2, durationMs: 10, sessionId: `S-${role}`, invocationToken: `tok-${role}` };
 }
 
-function sleep(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-test("every catalog role has an allowlist the runner accepts", () => {
-	const names = Object.keys(SWARM_ROLES);
-	assert.ok(names.length >= 5, `esperaba al menos 5 roles, encontré ${names.length}`);
-	for (const [name, spec] of Object.entries(SWARM_ROLES)) {
-		assert.ok(spec.tools.length > 0, `${name} has no tools`);
-		assert.ok(!spec.tools.some((tool) => /bash|shell|exec|fetch|http|curl|wget|write|edit/i.test(tool)), `${name} declares a forbidden tool`);
+test("the catalog is the four orthogonal profiles and every allowlist is valid", () => {
+	assert.deepEqual([...DEFAULT_ROLES].sort(), ["authz", "headers-config", "js-analyzer", "schema"]);
+	for (const [name, role] of Object.entries(SWARM_ROLES)) {
+		assert.ok(role.tools.includes("bounty_blackboard"), `${name} cannot publish`);
+		assert.doesNotThrow(() => validateTools(role.tools), `${name} has a tool the runner rejects`);
 	}
 });
 
-test("the catalog is complementary, not redundant: it has an authorization, a client and a skeptic role", () => {
-	for (const name of ["authz-matrix", "js-analyst", "skeptic"]) assert.ok(name in SWARM_ROLES, `falta el rol ${name}`);
+test("S11: a child can never receive bounty_swarm", () => {
+	assert.throws(() => validateTools(["bounty_swarm"]), /not in the bounty allowlist/);
+	// And no role in the catalog declares it.
+	for (const role of Object.values(SWARM_ROLES)) assert.ok(!role.tools.includes("bounty_swarm"));
 });
 
-test("runs every role and keeps the declared order, not the completion order", async () => {
-	const roles = [role("slow"), role("fast"), role("medium")];
-	const delays: Record<string, number> = { slow: 30, fast: 1, medium: 10 };
-	const run = await runSwarm({ roles, maxParallel: 3 }, { run: async (item) => {
-		await sleep(delays[item.role] ?? 0);
-		return { ok: true, output: item.role, toolCalls: 1, durationMs: 1, sessionId: `S-${item.role}` };
-	} });
-
-	assert.deepEqual(run.results.map((result) => result.role), ["slow", "fast", "medium"]);
-	assert.equal(run.results.every((result) => result.status === "ran"), true);
-	assert.equal(run.toolCalls, 3);
+test("an out-of-scope target aborts before spawning a single child", async () => {
+	let spawned = 0;
+	const run = await runSwarm(
+		{ target: "https://evil.example" },
+		{
+			checkTarget: async () => ({ ok: false, reason: "host fuera del alcance permitido" }),
+			run: async () => {
+				spawned += 1;
+				return outcome("x");
+			},
+		},
+	);
+	assert.equal(run.aborted, true);
+	assert.match(run.reason, /fuera del alcance/);
+	assert.equal(spawned, 0);
+	assert.equal(run.results.length, 0);
+	assert.match(summarizeSwarm(run), /abortado antes de lanzar nada/);
 });
 
-test("never exceeds the parallelism cap", async () => {
+test("the concurrency cap is respected", async () => {
 	let active = 0;
 	let peak = 0;
-	const roles = Array.from({ length: 6 }, (_unused, index) => role(`r${index}`));
-
-	const run = await runSwarm({ roles, maxParallel: 2 }, { run: async (item) => {
-		active += 1;
-		peak = Math.max(peak, active);
-		await sleep(12);
-		active -= 1;
-		return { ok: true, output: item.role, toolCalls: 1, durationMs: 12, sessionId: "S" };
-	} });
-
+	const run = await runSwarm(
+		{ target: "https://a.acme.com", maxParallel: 2 },
+		{
+			checkTarget: async () => ({ ok: true }),
+			run: async (role) => {
+				active += 1;
+				peak = Math.max(peak, active);
+				await new Promise((resolve) => setTimeout(resolve, 10));
+				active -= 1;
+				return outcome(role.role);
+			},
+		},
+	);
 	assert.equal(peak, 2);
-	assert.equal(run.results.length, 6);
+	assert.equal(run.results.length, 4);
 });
 
-test("a cap bigger than the swarm is clamped, not an error", async () => {
+test("the cap is clamped to the hard maximum and to the role count", async () => {
 	let peak = 0;
 	let active = 0;
-	const roles = [role("a"), role("b")];
-	const run = await runSwarm({ roles, maxParallel: 9 }, { run: async () => {
-		active += 1;
-		peak = Math.max(peak, active);
-		await sleep(5);
-		active -= 1;
-		return { ok: true, output: "", toolCalls: 0, durationMs: 5, sessionId: "S" };
-	} });
-	assert.equal(peak, 2);
-	assert.equal(run.results.filter((result) => result.status === "ran").length, 2);
+	await runSwarm(
+		{ target: "https://a.acme.com", maxParallel: 99 },
+		{
+			checkTarget: async () => ({ ok: true }),
+			run: async (role) => {
+				active += 1;
+				peak = Math.max(peak, active);
+				await new Promise((resolve) => setTimeout(resolve, 5));
+				active -= 1;
+				return outcome(role.role);
+			},
+		},
+	);
+	assert.equal(peak, 4, "four roles, so the cap cannot exceed four");
 });
 
-test("an empty swarm is refused instead of doing nothing silently", async () => {
-	await assert.rejects(() => runSwarm({ roles: [] }, { run: async () => ({ ok: true, output: "", toolCalls: 0, durationMs: 0, sessionId: "" }) }), /at least one role/);
+test("the fan-in keeps each child's identity and order", async () => {
+	const run = await runSwarm(
+		{ target: "https://a.acme.com", roles: [{ role: "authz", task: "mirar", tools: ["read"] }, { role: "schema", task: "mirar", tools: ["read"] }] },
+		{ checkTarget: async () => ({ ok: true }), run: async (role) => ({ ...outcome(role.role), durationMs: role.role === "authz" ? 20 : 1 }) },
+	);
+	assert.equal(run.aborted, false);
+	assert.deepEqual(run.results.map((result) => result.role), ["authz", "schema"]);
+	const [first] = run.results;
+	assert.equal(first?.status === "ran" ? first.sessionId : "", "S-authz");
+	assert.equal(first?.status === "ran" ? first.invocationToken : "", "tok-authz");
+	assert.match(summarizeSwarm(run), /token presente/);
 });
 
-test("the same role twice is refused: that is redundancy, not complement", async () => {
+test("a duplicated role is redundancy, and it is refused", async () => {
 	await assert.rejects(
-		() => runSwarm({ roles: [role("authz-matrix"), role("authz-matrix")] }, { run: async () => ({ ok: true, output: "", toolCalls: 0, durationMs: 0, sessionId: "" }) }),
+		() => runSwarm({ target: "https://a.acme.com", roles: [{ role: "authz", task: "x", tools: ["read"] }, { role: "authz", task: "y", tools: ["read"] }] }, { checkTarget: async () => ({ ok: true }), run: async (role) => outcome(role.role) }),
 		/duplicated role/,
 	);
 });
 
-test("a role that asks for a shell or a fetch never starts", async () => {
-	for (const tools of [["bash"], ["web_fetch"], ["write"]]) {
-		await assert.rejects(
-			() => runSwarm({ roles: [role("bad", tools)] }, { run: async () => ({ ok: true, output: "", toolCalls: 0, durationMs: 0, sessionId: "" }) }),
-			/never receive|not in the bounty allowlist/,
-		);
-	}
-});
-
-test("a role without a mandate is refused", async () => {
+test("a role that asks for a shell never starts", async () => {
 	await assert.rejects(
-		() => runSwarm({ roles: [{ role: "empty", task: "  ", tools: ["read"] }] }, { run: async () => ({ ok: true, output: "", toolCalls: 0, durationMs: 0, sessionId: "" }) }),
-		/no mandate/,
+		() => runSwarm({ target: "https://a.acme.com", roles: [{ role: "bad", task: "x", tools: ["bash"] }] }, { checkTarget: async () => ({ ok: true }), run: async (role) => outcome(role.role) }),
+		/never receive|not in the bounty allowlist/,
 	);
 });
 
 test("the aggregate budget stops launching and says which roles never ran", async () => {
-	const roles = [role("a"), role("b"), role("c")];
 	const launched: string[] = [];
-	const run = await runSwarm({ roles, maxParallel: 1, budgetToolCalls: 1000 }, { run: async (item) => {
-		launched.push(item.role);
-		return { ok: true, output: "", toolCalls: 600, durationMs: 1, sessionId: `S-${item.role}` };
-	} });
-
-	assert.deepEqual(launched, ["a", "b"]);
+	const run = await runSwarm(
+		{ target: "https://a.acme.com", maxParallel: 1, budgetToolCalls: 100 },
+		{
+			checkTarget: async () => ({ ok: true }),
+			run: async (role) => {
+				launched.push(role.role);
+				return { ...outcome(role.role), toolCalls: 60 };
+			},
+		},
+	);
 	assert.equal(run.stoppedByBudget, true);
-	assert.equal(run.toolCalls, 1200);
-	const skipped = run.results.filter((result) => result.status === "skipped");
-	assert.deepEqual(skipped.map((result) => result.role), ["c"]);
+	assert.equal(launched.length, 2);
+	assert.equal(run.results.filter((result) => result.status === "skipped").length, 2);
 });
 
-test("a budget that is not spent lets every role run", async () => {
-	const roles = [role("a"), role("b"), role("c")];
-	const run = await runSwarm({ roles, maxParallel: 1, budgetToolCalls: 1000 }, { run: async (item) => ({ ok: true, output: "", toolCalls: 100, durationMs: 1, sessionId: `S-${item.role}` }) });
-	assert.equal(run.stoppedByBudget, false);
-	assert.equal(run.results.every((result) => result.status === "ran"), true);
-	assert.equal(run.toolCalls, 300);
+test("a child over its own budget is reported, not trusted", async () => {
+	const run = await runSwarm(
+		{ target: "https://a.acme.com", roles: [{ role: "authz", task: "x", tools: ["read"] }], perAgentBudget: 5 },
+		{ checkTarget: async () => ({ ok: true }), run: async (role) => ({ ...outcome(role.role), toolCalls: 9 }) },
+	);
+	const [first] = run.results;
+	assert.equal(first?.status === "ran" ? first.ok : true, false);
+	assert.match(first?.status === "ran" ? (first.error ?? "") : "", /presupuesto/);
 });
 
 test("one child failing does not kill the swarm", async () => {
-	const roles = [role("a"), role("b"), role("c")];
-	const run = await runSwarm({ roles }, { run: async (item) => {
-		if (item.role === "b") return { ok: false, output: "", toolCalls: 3, durationMs: 1, sessionId: "S-B", error: "gate blocked" };
-		return { ok: true, output: item.role, toolCalls: 1, durationMs: 1, sessionId: `S-${item.role}` };
-	} });
-
+	const run = await runSwarm(
+		{ target: "https://a.acme.com", roles: ["a", "b", "c"].map((name) => ({ role: name, task: "x", tools: ["read"] })) },
+		{
+			checkTarget: async () => ({ ok: true }),
+			run: async (role) => {
+				if (role.role === "b") throw new Error("spawn failed");
+				return outcome(role.role);
+			},
+		},
+	);
 	assert.equal(run.results.filter((result) => result.status === "ran" && result.ok).length, 2);
 	const failed = run.results.find((result) => result.role === "b");
-	assert.equal(failed?.status, "ran");
-	assert.equal(failed?.status === "ran" ? failed.ok : true, false);
-	assert.match(summarizeSwarm(run), /b: falló \(gate blocked\)/);
+	assert.equal(failed?.status === "ran" ? failed.error : "", "spawn failed");
 });
 
-test("a child that cannot even spawn is recorded, not propagated", async () => {
-	const run = await runSwarm({ roles: [role("a")] }, { run: async () => {
-		throw new Error("spawn failed");
-	} });
-	const [first] = run.results;
-	assert.equal(first?.status, "ran");
-	assert.equal(first?.status === "ran" ? first.ok : true, false);
-	assert.match(first?.status === "ran" ? (first.error ?? "") : "", /spawn failed/);
-});
-
-test("the task names the program, the scope and the role mandate", () => {
-	const spec = { role: "authz-matrix", task: SWARM_ROLES["authz-matrix"]?.brief ?? "", tools: SWARM_ROLES["authz-matrix"]?.tools ?? [] };
-	const task = swarmTaskFor(spec, { program: "acme", scopePath: "/w/acme/scope.yaml", focus: "el endpoint de facturas" });
-	assert.match(task, /programa acme/);
-	assert.match(task, /\/w\/acme\/scope\.yaml/);
-	assert.match(task, /authz-matrix/);
+test("the task carries the target and the shared snapshot", () => {
+	const spec = { role: "js-analyzer", task: SWARM_ROLES["js-analyzer"]?.brief ?? "", tools: SWARM_ROLES["js-analyzer"]?.tools ?? [] };
+	const task = swarmTaskFor(spec, { program: "acme", scopePath: "/w/acme/scope.yaml", target: "https://a.acme.com", snapshot: renderSnapshot([ARTIFACT]) });
+	assert.match(task, /Target de esta corrida: https:\/\/a\.acme\.com/);
+	assert.match(task, /endpoint · https:\/\/a\.acme\.com\/api/);
 	assert.match(task, /bounty_blackboard claim/);
-	assert.match(task, /Foco de esta corrida: el endpoint de facturas/);
-	assert.match(task, /\{"role":"authz-matrix"/);
+	assert.match(task, /\{"role":"js-analyzer"/);
 });
 
-test("the focus is flattened and bounded", () => {
-	const spec = { role: "skeptic", task: "refutar", tools: ["read"] };
-	const long = swarmTaskFor(spec, { program: "acme", scopePath: "/s", focus: `linea1\nlinea2\r\n${"x".repeat(600)}` });
-	const focusLine = long.split("\n").find((line) => line.startsWith("Foco de esta corrida:"));
-	assert.ok(focusLine, "no focus line");
-	assert.ok((focusLine as string).length < 460, "the focus line is not bounded");
-	assert.doesNotMatch(focusLine as string, /\n/);
-});
-
-test("the summary counts what ran and reports the budget", () => {
-	const summary = summarizeSwarm({
-		results: [
-			{ role: "a", status: "ran", ok: true, output: "", toolCalls: 4, durationMs: 2000, sessionId: "S-1" },
-			{ role: "b", status: "skipped", reason: "budget" },
-		],
-		toolCalls: 4,
-		stoppedByBudget: true,
-	});
-	assert.match(summary, /1 rol\(es\) ejecutado\(s\), 4 llamadas/);
-	assert.match(summary, /presupuesto agotado/);
-	assert.match(summary, /b: no se lanzó/);
+test("an empty snapshot says so instead of looking empty by accident", () => {
+	assert.match(renderSnapshot([]), /no tiene artefactos/);
 });

@@ -7,7 +7,7 @@
  * the way gentle-pi does) follows `docs/extensions.md:90-103` and `extensions/gentle-agents.ts:2622`.
  * **It has not been executed inside a live Pi session yet** — that is the first thing Phase E does.
  */
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
@@ -446,57 +446,54 @@ export default function bountyExtension(pi: PiLike): void {
 		name: "bounty_swarm",
 		label: "Bounty swarm",
 		description:
-			"Launch complementary subagents over the same program: each role gets one perspective, its own tool allowlist and its own session, and publishes what it finds on the board. The parent bounds how many run at once and the aggregate tool-call budget, and aggregates their discoveries. Roles: recon-surface, authz-matrix, js-analyst, schema-auditor, skeptic.",
+			"Deploy the orthogonal swarm over one in-scope target: js-analyzer, authz, schema, headers-config. The gate decides before any child exists; each child gets the blackboard snapshot, its own session and its own budget; the parent caps concurrency and aggregate calls, then returns the target artifacts and the candidate finding ids for bounty_verify.",
 		parameters: {
 			type: "object",
 			additionalProperties: false,
 			properties: {
 				program: { type: "string" },
-				roles: {
-					type: "array",
-					items: { type: "string", enum: Object.keys(SWARM_ROLES) },
-					description: "Complementary roles. Repeating a role is refused: that is redundancy, not coverage.",
-				},
-				focus: { type: "string", description: "Optional one-line focus for this run, e.g. the endpoint or surface to look at." },
-				max_parallel: { type: "number", description: "How many children run at once. Default 3; more does not go faster against a shared rate." },
-				budget_tool_calls: { type: "number", description: "Aggregate tool calls across the whole swarm. Default 1200; when spent, the remaining roles are not launched." },
+				target: { type: "string", description: "In-scope URL or host. It must pass the same gate as bounty_run." },
+				roles: { type: "array", items: { type: "string", enum: Object.keys(SWARM_ROLES) }, description: "Default: the four profiles. Repeating one is refused." },
+				max_parallel: { type: "number", description: "Simultaneous children. Default 3, hard cap 6." },
+				budget_tool_calls: { type: "number", description: "Aggregate tool calls across the swarm. Default 1200." },
+				per_agent_budget: { type: "number", description: "Per-child ceiling; a child over it is reported, not trusted." },
 			},
-			required: ["program", "roles"],
+			required: ["program", "target"],
 		} as never,
 		async execute(_toolCallId, params) {
 			const resolved = resolveProgram(params.program);
 			if (!resolved.ok) return text(resolved.text, { ok: false });
 			const program = resolved.program;
-			const requested = Array.isArray(params.roles) ? params.roles.map((role) => String(role).trim()).filter((role) => role.length > 0) : [];
-			const catalog = Object.keys(SWARM_ROLES).join(", ");
-			if (requested.length === 0) return text(`Falta el enjambre: elegí al menos un rol. Roles disponibles: ${catalog}.`, { ok: false });
-			const unknown = requested.filter((role) => !(role in SWARM_ROLES));
-			if (unknown.length > 0) return text(`Rol desconocido: ${unknown.join(", ")}. Roles disponibles: ${catalog}.`, { ok: false });
-
+			const target = String(params.target);
 			const session = await sessionFor(program);
-			const specs = requested.map((role) => ({ role, task: SWARM_ROLES[role]?.brief ?? "", tools: [...(SWARM_ROLES[role]?.tools ?? [])] }));
-			const blackboard = createSharedBlackboard({ dir: session.paths.workspace, program: resolved.program });
-			const cursor = (await board.state()).headSeq;
+			// S10: the gate decides before any child exists; the same check is repeated inside runSwarm.
+			const precheck = await session.checkTarget(target);
+			if (!precheck.ok) return text(`El enjambre no arranca: ${precheck.reason ?? "target fuera de alcance"}. No se lanzó ningún subagente.`, { ok: false, aborted: true });
+			const requested = Array.isArray(params.roles) ? params.roles.map((role) => String(role).trim()).filter((role) => role.length > 0) : [];
+			const unknown = requested.filter((role) => !(role in SWARM_ROLES));
+			if (unknown.length > 0) return text(`Rol desconocido: ${unknown.join(", ")}. Disponibles: ${Object.keys(SWARM_ROLES).join(", ")}.`, { ok: false });
 			const scopePath = session.paths.scopeFile() ?? join(root, "work", program, "scope.yaml");
-			const focus = typeof params.focus === "string" ? params.focus : undefined;
 			const timeoutMs = config?.budget?.maxWallMs ?? 15 * 60 * 1000;
 			const runner = createPiRunner({
 				piCommand: process.env.GENTLE_BOUNTY_PI ? [process.env.GENTLE_BOUNTY_PI] : ["pi"],
 				extensionEntry: fileURLToPath(import.meta.url),
 				defaultTimeoutMs: timeoutMs,
 			});
-
 			const run = await runSwarm(
 				{
-					roles: specs,
+					target,
+					...(requested.length === 0 ? {} : { roles: requested.map((role) => ({ role, task: SWARM_ROLES[role]?.brief ?? "", tools: [...(SWARM_ROLES[role]?.tools ?? [])] })) }),
 					...(params.max_parallel === undefined ? {} : { maxParallel: Number(params.max_parallel) }),
 					...(params.budget_tool_calls === undefined ? {} : { budgetToolCalls: Number(params.budget_tool_calls) }),
+					...(params.per_agent_budget === undefined ? {} : { perAgentBudget: Number(params.per_agent_budget) }),
 				},
 				{
-					run: async (spec) => {
+					checkTarget: (value) => session.checkTarget(value),
+					snapshot: (value) => session.blackboard.query({ target: value }),
+					run: async (spec, context) => {
 						const result = await runner.run({
 							agent: { name: `bounty-${spec.role}`, tools: spec.tools },
-							task: swarmTaskFor(spec, { program, scopePath, ...(focus === undefined ? {} : { focus }) }),
+							task: swarmTaskFor(spec, { program, scopePath, target: context.target, snapshot: context.snapshot }),
 							cwd: root,
 							env: { GENTLE_BOUNTY_ROOT: root, GENTLE_BOUNTY_PROGRAM: program },
 							timeoutMs,
@@ -507,18 +504,31 @@ export default function bountyExtension(pi: PiLike): void {
 							toolCalls: result.toolCalls.length,
 							durationMs: result.durationMs,
 							sessionId: result.sessionId,
+							invocationToken: result.invocationToken,
 							...(result.error === undefined ? {} : { error: result.error }),
 						};
 					},
 				},
 			);
+			if (run.aborted) return text(summarizeSwarm(run), { ok: false, aborted: true });
 
-			const fresh = await runBlackboardAction(blackboard, session.sessionId, { action: "since", ts: head });
-			return text(`${summarizeSwarm(run)}\n\nPizarra:\n${fresh.text}`, {
-				ok: run.results.every((result) => result.status === "skipped" || result.ok),
-				toolCalls: run.toolCalls,
-				stoppedByBudget: run.stoppedByBudget,
-			});
+			// S12: fan-in from what the children published, plus the candidates a human must verify.
+			const artifacts = await session.blackboard.query({ target });
+			const candidates: string[] = [];
+			try {
+				for (const file of await readdir(session.paths.findingsDir)) {
+					if (!file.endsWith(".json")) continue;
+					const finding = JSON.parse(await readFile(join(session.paths.findingsDir, file), "utf8")) as { id?: string; state?: string };
+					if (finding.state === "candidate" && typeof finding.id === "string") candidates.push(finding.id);
+				}
+			} catch {
+				// No findings yet is a valid fan-in.
+			}
+			await session.phase({ phase: "hypothesis", nextStep: `Enjambre sobre ${target}: ${candidates.length} candidato(s) para verificar con bounty_verify.` });
+			return text(
+				`${summarizeSwarm(run)}\n\nArtefactos de ${target} en la pizarra: ${artifacts.length}\nCandidatos para bounty_verify: ${candidates.length === 0 ? "ninguno" : candidates.join(", ")}`,
+				{ ok: run.results.every((result) => result.status === "skipped" || result.ok), toolCalls: run.toolCalls, artifacts: artifacts.length, candidates },
+			);
 		},
 	});
 

@@ -111,6 +111,8 @@ export interface ProgramSession {
 		/** Task 7: the runner's token for this invocation; without it the verdict is refused. */
 		invocationToken?: string;
 	}): Promise<ToolResult>;
+	/** S10: the swarm asks before spawning anything; no scope decision, no children. */
+	checkTarget(target: string): Promise<{ ok: boolean; reason?: string }>;
 	/** Emergency stop: kills the children of bounty_run and records it. */
 	stop(reason: string): Promise<ToolResult>;
 	scope(input: { file: string; confirm?: boolean }): Promise<ToolResult>;
@@ -517,6 +519,12 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 
 			await refresh("Con el alcance confirmado, arranco el reconocimiento.");
 			return { ok: true, text: `${summary}\n\nAlcance confirmado por un humano (hash ${hash.slice(0, 12)}…). Arranco.` };
+		},
+
+		async checkTarget(target) {
+			if (policy === null) return { ok: false, reason: "no hay alcance cargado y confirmado en esta sesión" };
+			const decision = await gate(policy, { target, argv: [], http: true }, { dns: deps.dns, readFile: deps.readFile });
+			return decision.allowed ? { ok: true } : { ok: false, reason: `${decision.reason}${decision.detail === undefined ? "" : ` (${decision.detail})`}` };
 		},
 
 		async run(input) {
