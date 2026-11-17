@@ -85,6 +85,7 @@ export const ALLOWED_CHILD_TOOLS = [
 	"bounty_scope",
 	"bounty_run",
 	"bounty_evidence",
+	"bounty_board",
 	"bounty_finding",
 	"bounty_phase",
 	"bounty_status",

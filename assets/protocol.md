@@ -59,6 +59,18 @@ detalle no es un informe.
 - Si el gate bloquea, la razón queda escrita en `status.md` y se corrige el alcance o el comando.
 - Un token que no es un host no bloquea nada: no hay perfiles por herramienta.
 
+## Pizarra compartida: no repitas trabajo
+
+`bounty_board` es el estado de descubrimientos del programa, compartido entre todos los agentes de la
+sesión, incluidos los subagentes. No es pub/sub: se lee cuando consultás.
+
+- **Antes de empezar un ítem, `claim`.** Si otro agente lo tiene, elegí otro: `claim` te dice quién.
+- **Publicá lo que descubrís** con `publish` (host, endpoint, parámetro, hipótesis). Es idempotente por
+  `kind + target + data`: si ya estaba, te lo dice y no lo repite.
+- **`since` con tu cursor** al empezar cada turno: eso es lo que el resto encontró mientras trabajabas.
+- La pizarra lleva la forma, no el contenido. Los bytes crudos van a `bounty_evidence`.
+- El autor de cada ítem es la sesión, no lo que escribas: no hay forma de publicar como otro.
+
 ## Verificación
 
 - Un hallazgo pasa a `verified` solo cuando lo reproduce un verificador que **no** es quien lo

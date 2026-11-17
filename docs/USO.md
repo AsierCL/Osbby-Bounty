@@ -181,6 +181,22 @@ runtime los reporta). Se configuran en `.bounty/config.json`:
 Al llegar al techo, el trabajo se detiene en orden y `status.md` lo dice. La evidencia ya escrita no
 se pierde.
 
+## Pizarra compartida: cómo se coordinan varios agentes
+
+Cuando varios subagentes trabajan sobre el mismo programa, `bounty_board` es lo que evita que
+trabajen a ciegas o repitan lo mismo.
+
+- `bounty_board { program, action: "since", cursor: 0 }` — qué se descubrió hasta ahora.
+- `publish` con `kind` (host, endpoint, param, hypothesis…), `target` y `data` chico. Es idempotente:
+  el mismo descubrimiento dos veces es un solo ítem.
+- `claim` antes de trabajar un ítem; el lease vence solo (10 min por defecto) y se puede renovar.
+- `release` cuando terminás, para que otro lo tome.
+- El autor es la sesión, no el texto: nadie puede publicar como otro.
+- La pizarra guarda **forma**, no contenido: el payload crudo va a la cadena de evidencia.
+
+La pizarra vive en `work/<programa>/board/` (`board.jsonl` + `claims.json`). Se lee bajo lock, igual
+que la evidencia, así que varios procesos del mismo programa no se pisan.
+
 ## Dónde vive todo
 
 ```
@@ -188,6 +204,7 @@ work/<programa>/
 ├── scope.yaml    ← lo escribís vos
 ├── status.md     ← leelo, es tu panel
 ├── state.json    ← fase y pendientes
+├── board/        ← pizarra del enjambre (descubrimientos + leases)
 ├── findings/     ← un JSON por hallazgo
 ├── evidence/     ← log encadenado por hash + puntero de cabeza
 └── reports/      ← reportes generados

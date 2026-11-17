@@ -20,6 +20,8 @@ import { buildDomainPrompt } from "../src/pi/prompt.ts";
 import { createPiRunner } from "../src/pi/runner.ts";
 import { verifierTaskFor, parseVerdict } from "../src/pi/verifier.ts";
 import { createEvidenceStore } from "../src/core/evidence.ts";
+import { createBoard } from "../src/core/board.ts";
+import { runBoardAction, type BoardAction } from "../src/pi/board-tools.ts";
 import { extractJsonArray } from "../src/core/json-extract.ts";
 import type { BountyPhase } from "../src/core/status.ts";
 import type { RedactionMode } from "../src/core/redact.ts";
@@ -321,6 +323,44 @@ export default function bountyExtension(pi: PiLike): void {
 				...(params.payload === undefined ? {} : { payload: params.payload }),
 			});
 			return text(result.text, { ok: result.ok });
+		},
+	});
+
+	pi.registerTool({
+		name: "bounty_board",
+		label: "Bounty board",
+		description:
+			"Shared discovery board of the program. publish a discovery (idempotent by kind+target+data), claim an item before working on it, release it when done, since a cursor to see what the swarm found, or query by kind/target. The author is this session, never the text you pass.",
+		parameters: {
+			type: "object",
+			additionalProperties: false,
+			properties: {
+				program: { type: "string" },
+				action: { type: "string", enum: ["publish", "claim", "release", "since", "query"] },
+				kind: { type: "string", description: "host, endpoint, param, hypothesis, finding, note…" },
+				target: { type: "string", description: "The host or URL the discovery is about." },
+				data: { type: "object", description: "Small structured hint (≤4KB). Raw bytes belong in bounty_evidence." },
+				seq: { type: "number", description: "Board item number, for claim/release." },
+				ttl_ms: { type: "number", description: "Lease length for claim. Default 10 minutes." },
+				cursor: { type: "number", description: "For since: return only items with a higher seq." },
+			},
+			required: ["program", "action"],
+		} as never,
+		async execute(_toolCallId, params) {
+			const resolved = resolveProgram(params.program);
+			if (!resolved.ok) return text(resolved.text, { ok: false });
+			const session = await sessionFor(resolved.program);
+			const board = createBoard({ dir: join(session.paths.workspace, "board") });
+			const result = await runBoardAction(board, session.sessionId, {
+				action: params.action as BoardAction,
+				...(params.kind === undefined ? {} : { kind: String(params.kind) }),
+				...(params.target === undefined ? {} : { target: String(params.target) }),
+				...(params.data === undefined ? {} : { data: params.data as Record<string, unknown> }),
+				...(params.seq === undefined ? {} : { seq: Number(params.seq) }),
+				...(params.ttl_ms === undefined ? {} : { ttlMs: Number(params.ttl_ms) }),
+				...(params.cursor === undefined ? {} : { cursor: Number(params.cursor) }),
+			});
+			return text(result.text, { ok: result.ok, ...result.details });
 		},
 	});
 
