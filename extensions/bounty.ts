@@ -9,7 +9,7 @@
  */
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
 import { resolve4, resolve6, resolveCname } from "node:dns/promises";
 import { isIP } from "node:net";
@@ -22,6 +22,7 @@ import { verifierTaskFor, parseVerdict } from "../src/pi/verifier.ts";
 import { createEvidenceStore } from "../src/core/evidence.ts";
 import { createBoard } from "../src/core/board.ts";
 import { createRoleStore, normalizeRoleName } from "../src/core/roles.ts";
+import { extractSurface, summarizeSurface, endpointBoardData, MAX_SURFACE_BYTES } from "../src/core/surface.ts";
 import { runBoardAction, type BoardAction } from "../src/pi/board-tools.ts";
 import { runSwarm, SWARM_ROLES, summarizeSwarm, swarmTaskFor } from "../src/pi/swarm.ts";
 import { extractJsonArray } from "../src/core/json-extract.ts";
@@ -330,6 +331,67 @@ export default function bountyExtension(pi: PiLike): void {
 				...(params.payload === undefined ? {} : { payload: params.payload }),
 			});
 			return text(result.text, { ok: result.ok });
+		},
+	});
+
+	pi.registerTool({
+		name: "bounty_surface",
+		label: "Bounty surface",
+		description:
+			"Extract the surface from an artifact that is already captured under work/<program>/: a JavaScript bundle, an OpenAPI/Swagger document or a GraphQL introspection. Publishes endpoints (path, method, parameter NAMES) to the board. No network; values of secrets are never read out.",
+		parameters: {
+			type: "object",
+			additionalProperties: false,
+			properties: {
+				program: { type: "string" },
+				file: { type: "string", description: "Path to the artifact, relative to work/<program>/ (for example files/main.js). It must already exist: bounty_surface never downloads anything." },
+			},
+			required: ["program", "file"],
+		} as never,
+		async execute(_toolCallId, params) {
+			const resolved = resolveProgram(params.program);
+			if (!resolved.ok) return text(resolved.text, { ok: false });
+			const session = await sessionFor(resolved.program);
+			const workspace = resolve(session.paths.workspace);
+			const candidate = resolve(workspace, String(params.file));
+			if (!candidate.startsWith(`${workspace}${sep}`)) {
+				return text(`El archivo tiene que estar dentro de work/${resolved.program}/. No se lee nada fuera del workspace del programa.`, { ok: false });
+			}
+
+			let bytes: Buffer;
+			try {
+				bytes = await readFile(candidate);
+			} catch {
+				return text(`No existe ${String(params.file)}. Capturalo primero con bounty_run (por ejemplo curl -o files/main.js) y volvé con el archivo ya en disco.`, { ok: false });
+			}
+			if (bytes.byteLength > MAX_SURFACE_BYTES) {
+				return text(`El archivo ocupa ${bytes.byteLength} bytes y el tope es ${MAX_SURFACE_BYTES}. Partilo o usá el esquema en vez del bundle.`, { ok: false });
+			}
+
+			const relative = candidate.slice(workspace.length + 1);
+			const report = extractSurface(bytes.toString("utf8"), relative);
+			const board = createBoard({ dir: join(session.paths.workspace, "board") });
+			let created = 0;
+			let known = 0;
+			const lines: string[] = [];
+			for (const endpoint of report.endpoints) {
+				const published = await board.publish({ kind: "endpoint", target: endpoint.path, data: endpointBoardData(endpoint), by: session.sessionId });
+				if (published.created) {
+					created += 1;
+					if (lines.length < 15) lines.push(`+ ${endpoint.method === null ? "ruta" : endpoint.method} ${endpoint.path}${endpoint.params.length === 0 ? "" : ` (${endpoint.params.join(", ")})`}`);
+				} else known += 1;
+			}
+			for (const secret of report.secrets) {
+				const published = await board.publish({ kind: "secret", target: secret.location, data: { pattern: secret.pattern }, by: session.sessionId });
+				if (published.created) {
+					created += 1;
+					lines.push(`! secreto en ${secret.location}: ${secret.pattern}`);
+				}
+			}
+
+			const body = [summarizeSurface(report), `Archivo: ${relative}`, `Pizarra: ${created} nuevo(s), ${known} ya conocido(s)`, "", ...lines].join("\n");
+			const secretNote = report.secrets.length === 0 ? "" : `\n\nUn secreto de un tercero se registra SIEMPRE como hallazgo sensible (bounty_finding, sensitive: true) y no se usa para autenticarse. El valor no está en la pizarra: quedó en el archivo.`;
+			return text(`${body}${secretNote}`, { ok: true, endpoints: report.endpoints.length, secrets: report.secrets.length, created, known, dropped: report.dropped });
 		},
 	});
 

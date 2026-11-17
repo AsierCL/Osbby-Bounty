@@ -135,4 +135,17 @@ en la cadena (sigue viajando por el config privado de curl), y el modelo solo ve
 |---|---|---|
 | T5 | (este commit) | `src/core/headers.ts`, `src/core/roles.ts`, `role` en `bounty_run`, tool `bounty_session`, `scripts/set-role.ts`, `tests/roles.test.ts` (10 tests) |
 
-Suite completa: 460 tests, 460 pass. Sigue pendiente T4 (`bounty_surface`) y T6 (recon como job).
+Suite completa: 460 tests, 460 pass.
+
+### L7 — T4 entregada
+
+| Unidad | Commit | Evidencia |
+|---|---|---|
+| T4 | (este commit) | `src/core/surface.ts`, `bounty_surface`, `tests/surface.test.ts` (11 tests) |
+
+Extracción sobre artefactos ya capturados: JS (rutas + parámetros), OpenAPI/Swagger, GraphQL. Sin red,
+salida acotada a 200 entradas con conteo de descartadas, y secretos por ubicación y patrón, nunca por
+valor. Suite completa: 471 tests, 471 pass.
+
+Queda pendiente T6 (`bounty_recon` como job con estado persistido): cambia el ciclo de vida del proceso,
+por eso se hace como unidad propia y no al final de una sesión larga.

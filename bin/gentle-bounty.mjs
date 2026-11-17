@@ -27,6 +27,7 @@ export const MAIN_SESSION_TOOLS = [
 	"bounty_evidence",
 	"bounty_board",
 	"bounty_session",
+	"bounty_surface",
 	"bounty_finding",
 	"bounty_phase",
 	"bounty_status",

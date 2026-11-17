@@ -246,6 +246,26 @@ pizarra.
 > Decisión del operador (S106): archivo plano, host propio, cuentas de prueba descartables. Si algún
 día eso deja de ser cierto, esta es la pieza que hay que cambiar, no el resto.
 
+## De un bundle a endpoints: `bounty_surface`
+
+`bounty_surface` no descarga nada: trabaja sobre un archivo que ya está en `work/<programa>/files/`.
+
+```bash
+# 1. dentro de la sesión, capturás con curl a un archivo del workspace
+bounty_run { program: "acme", tool: "curl", args: ["-sS", "-o", "work/acme/files/main.js",
+            "https://a.acme.com/static/main.js"], target: "https://a.acme.com/static/main.js" }
+# 2. extraés la superficie
+bounty_surface { program: "acme", file: "files/main.js" }
+```
+
+- Acepta bundles JavaScript, OpenAPI/Swagger y una introspección GraphQL; detecta el formato solo.
+- Publica en la pizarra `path`, verbo y **nombres** de parámetros. Tope: 200 entradas por archivo, y te
+dice cuántas descartó.
+- Los archivos estáticos (`.js`, `.css`, imágenes, fuentes) no entran: no son superficie.
+- Un secreto se reporta por ubicación y patrón, nunca por valor. Si es de un tercero, va como hallazgo
+sensible y no se usa para autenticarse.
+- Nada de red: el archivo tiene que existir, y tiene que estar dentro del workspace del programa.
+
 ## Dónde vive todo
 
 ```

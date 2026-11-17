@@ -166,6 +166,22 @@ La línea es clara y no se mueve:
 - Un endpoint interno descubierto se prueba **a través del host en scope** (o de la ruta documentada), no
   pegándole al host interno.
 
+## Superficie: del bundle a endpoints (S107)
+
+`bounty_surface` lee un artefacto que **ya está en disco** y publica su superficie en la pizarra. No
+descarga nada: primero lo capturás.
+
+1. Capturá con `bounty_run` a un archivo dentro del workspace:
+   `bounty_run { tool: "curl", args: ["-sS", "-o", "work/<programa>/files/main.js", "https://.../main.js"], target: "..." }`
+2. Extraé: `bounty_surface { program: "acme", file: "files/main.js" }`. Acepta bundles JS, OpenAPI/Swagger
+   y una introspección GraphQL.
+3. Cada endpoint va a la pizarra con path, verbo (si el esquema lo dice) y **nombres** de parámetros.
+4. Un secreto se publica por **ubicación y patrón**, nunca por valor: el valor sigue en el archivo. Si es
+   de un tercero, registralo con `bounty_finding` y `sensitive: true`; no lo uses para autenticarte.
+
+Los endpoints extraídos son **hipótesis de superficie**, no hallazgos: se prueban después, con `bounty_run`
+y el rol que corresponda.
+
 ## Matriz de autorización: un rol por archivo (S106)
 
 El programa puede tener varias cuentas de prueba. Cada una es un archivo plano que escribe el operador:
