@@ -22,6 +22,7 @@ import { verifierTaskFor, parseVerdict } from "../src/pi/verifier.ts";
 import { createEvidenceStore } from "../src/core/evidence.ts";
 import { createBoard } from "../src/core/board.ts";
 import { runBoardAction, type BoardAction } from "../src/pi/board-tools.ts";
+import { runSwarm, SWARM_ROLES, summarizeSwarm, swarmTaskFor } from "../src/pi/swarm.ts";
 import { extractJsonArray } from "../src/core/json-extract.ts";
 import type { BountyPhase } from "../src/core/status.ts";
 import type { RedactionMode } from "../src/core/redact.ts";
@@ -361,6 +362,86 @@ export default function bountyExtension(pi: PiLike): void {
 				...(params.cursor === undefined ? {} : { cursor: Number(params.cursor) }),
 			});
 			return text(result.text, { ok: result.ok, ...result.details });
+		},
+	});
+
+	pi.registerTool({
+		name: "bounty_swarm",
+		label: "Bounty swarm",
+		description:
+			"Launch complementary subagents over the same program: each role gets one perspective, its own tool allowlist and its own session, and publishes what it finds on the board. The parent bounds how many run at once and the aggregate tool-call budget, and aggregates their discoveries. Roles: recon-surface, authz-matrix, js-analyst, schema-auditor, skeptic.",
+		parameters: {
+			type: "object",
+			additionalProperties: false,
+			properties: {
+				program: { type: "string" },
+				roles: {
+					type: "array",
+					items: { type: "string", enum: Object.keys(SWARM_ROLES) },
+					description: "Complementary roles. Repeating a role is refused: that is redundancy, not coverage.",
+				},
+				focus: { type: "string", description: "Optional one-line focus for this run, e.g. the endpoint or surface to look at." },
+				max_parallel: { type: "number", description: "How many children run at once. Default 3; more does not go faster against a shared rate." },
+				budget_tool_calls: { type: "number", description: "Aggregate tool calls across the whole swarm. Default 1200; when spent, the remaining roles are not launched." },
+			},
+			required: ["program", "roles"],
+		} as never,
+		async execute(_toolCallId, params) {
+			const resolved = resolveProgram(params.program);
+			if (!resolved.ok) return text(resolved.text, { ok: false });
+			const program = resolved.program;
+			const requested = Array.isArray(params.roles) ? params.roles.map((role) => String(role).trim()).filter((role) => role.length > 0) : [];
+			const catalog = Object.keys(SWARM_ROLES).join(", ");
+			if (requested.length === 0) return text(`Falta el enjambre: elegí al menos un rol. Roles disponibles: ${catalog}.`, { ok: false });
+			const unknown = requested.filter((role) => !(role in SWARM_ROLES));
+			if (unknown.length > 0) return text(`Rol desconocido: ${unknown.join(", ")}. Roles disponibles: ${catalog}.`, { ok: false });
+
+			const session = await sessionFor(program);
+			const specs = requested.map((role) => ({ role, task: SWARM_ROLES[role]?.brief ?? "", tools: [...(SWARM_ROLES[role]?.tools ?? [])] }));
+			const board = createBoard({ dir: join(session.paths.workspace, "board") });
+			const cursor = (await board.state()).headSeq;
+			const scopePath = session.paths.scopeFile() ?? join(root, "work", program, "scope.yaml");
+			const focus = typeof params.focus === "string" ? params.focus : undefined;
+			const timeoutMs = config?.budget?.maxWallMs ?? 15 * 60 * 1000;
+			const runner = createPiRunner({
+				piCommand: process.env.GENTLE_BOUNTY_PI ? [process.env.GENTLE_BOUNTY_PI] : ["pi"],
+				extensionEntry: fileURLToPath(import.meta.url),
+				defaultTimeoutMs: timeoutMs,
+			});
+
+			const run = await runSwarm(
+				{
+					roles: specs,
+					...(params.max_parallel === undefined ? {} : { maxParallel: Number(params.max_parallel) }),
+					...(params.budget_tool_calls === undefined ? {} : { budgetToolCalls: Number(params.budget_tool_calls) }),
+				},
+				{
+					run: async (spec) => {
+						const result = await runner.run({
+							agent: { name: `bounty-${spec.role}`, tools: spec.tools },
+							task: swarmTaskFor(spec, { program, scopePath, ...(focus === undefined ? {} : { focus }) }),
+							cwd: root,
+							env: { GENTLE_BOUNTY_ROOT: root, GENTLE_BOUNTY_PROGRAM: program },
+							timeoutMs,
+						});
+						return {
+							ok: result.ok,
+							output: result.output,
+							toolCalls: result.toolCalls.length,
+							durationMs: result.durationMs,
+							sessionId: result.sessionId,
+							...(result.error === undefined ? {} : { error: result.error }),
+						};
+					},
+				},
+			);
+
+			const fresh = await runBoardAction(board, session.sessionId, { action: "since", cursor });
+			return text(`${summarizeSwarm(run)}\n\nPizarra:\n${fresh.text}`, {
+				ok: run.results.every((result) => result.status === "skipped" || result.ok),
+				toolCalls: run.toolCalls,
+				stoppedByBudget: run.stoppedByBudget,
+			});
 		},
 	});
 

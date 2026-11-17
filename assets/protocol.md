@@ -71,6 +71,20 @@ sesión, incluidos los subagentes. No es pub/sub: se lee cuando consultás.
 - La pizarra lleva la forma, no el contenido. Los bytes crudos van a `bounty_evidence`.
 - El autor de cada ítem es la sesión, no lo que escribas: no hay forma de publicar como otro.
 
+## Enjambre: roles complementarios, no copias
+
+`bounty_swarm` lanza subagentes con perspectivas distintas sobre el mismo programa. Cada rol tiene su
+allowlist, su sesión y su mandato; publica en la pizarra y muere. El padre agrega.
+
+- Roles: `recon-surface`, `authz-matrix`, `js-analyst`, `schema-auditor`, `skeptic`.
+- **No repitas roles.** Dos veces el mismo rol es redundancia y gasta presupuesto sin cubrir nada nuevo.
+- **El ritmo es del programa.** Más agentes en paralelo no van más rápido: hacen cola en el mismo
+  rate. Paralelizás el análisis, no el tráfico.
+- **El presupuesto es agregado.** Cuando el enjambre gasta el tope, los roles que faltan no se lanzan
+  y queda escrito cuáles fueron.
+- El `skeptic` no busca vulnerabilidades: intenta refutar lo que los otros publicaron.
+- **Ningún hijo verifica hallazgos.** La verificación sigue siendo del verificador independiente.
+
 ## Verificación
 
 - Un hallazgo pasa a `verified` solo cuando lo reproduce un verificador que **no** es quien lo

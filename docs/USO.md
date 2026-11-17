@@ -197,6 +197,24 @@ trabajen a ciegas o repitan lo mismo.
 La pizarra vive en `work/<programa>/board/` (`board.jsonl` + `claims.json`). Se lee bajo lock, igual
 que la evidencia, así que varios procesos del mismo programa no se pisan.
 
+## Enjambre: varios roles sobre el mismo programa
+
+```
+bounty_swarm { program: "acme", roles: ["authz-matrix", "js-analyst", "skeptic"],
+               focus: "el endpoint de facturas", max_parallel: 3, budget_tool_calls: 1200 }
+```
+
+- Cada rol recibe solo su mandato y su allowlist; no ve el razonamiento del orquestador ni el de los
+  otros roles.
+- `max_parallel` por defecto 3. Subirlo no acelera nada: el ritmo lo impone el programa.
+- `budget_tool_calls` es el techo **agregado**: cuando se agota, los roles restantes no se lanzan y el
+  resultado dice cuáles.
+- Al volver, el orquestador ve el resumen por rol y lo nuevo de la pizarra desde el cursor de arranque.
+- Un hijo que falla no cancela a los demás.
+
+Roles disponibles: `recon-surface`, `authz-matrix`, `js-analyst`, `schema-auditor`, `skeptic`.
+Repetir un rol se rechaza: es redundancia, no cobertura.
+
 ## Dónde vive todo
 
 ```

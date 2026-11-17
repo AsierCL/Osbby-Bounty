@@ -99,13 +99,17 @@ a job con estado persistido y consulta posterior. La cadena de evidencia ya lo s
 
 ## Orden
 
-| Unidad | Contenido | Criterio de aceptación |
-|---|---|---|
-| U1 | Capa 0: este documento | el plan externo queda marcado como superado |
-| U2 | Capa 1: `board.ts` | publish idempotente, claims con lease, concurrencia multi-proceso sin pérdida, línea corrupta rechazada |
-| U3 | Capa 2: `bounty_swarm` + 4 roles | fan-out con presupuesto por rol y agregado; el padre agrega sin ver el razonamiento de los hijos |
-| U4 | Capa 3: `bounty_surface` | un bundle real produce endpoints en el board, con dedupe |
-| U5 | Capa 3: `bounty_session` | matriz de roles sin credenciales en argv |
-| U6 | Capa 4: recon como job | la sesión no queda bloqueada; el job se consulta y se reanuda |
+| Unidad | Contenido | Criterio de aceptación | Estado |
+|---|---|---|---|
+| U1 | Capa 0: este documento | el plan externo queda marcado como superado | hecho |
+| U2 | Capa 1: `board.ts` | publish idempotente, claims con lease, concurrencia multi-proceso sin pérdida, línea corrupta rechazada | hecho (15 tests) |
+| U3 | Capa 2: `bounty_swarm` + 4 roles | fan-out con presupuesto por rol y agregado; el padre agrega sin ver el razonamiento de los hijos | hecho (16 tests + `bounty_board`) |
+| U4 | Capa 3: `bounty_surface` | un bundle real produce endpoints en el board, con dedupe | pendiente |
+| U5 | Capa 3: `bounty_session` | matriz de roles sin credenciales en argv | pendiente (decisión de almacenamiento) |
+| U6 | Capa 4: recon como job | la sesión no queda bloqueada; el job se consulta y se reanuda | pendiente |
+
+Estado a hoy: U1-U3 entregadas con tests y commits por unidad en `feat/bounty-swarm`. `bounty_board`
+ya está disponible para el orquestador y para los hijos (allowlist de `runner.ts` y de
+`bin/gentle-bounty.mjs`).
 
 Cada unidad: commit de unidad de trabajo, tests junto al comportamiento, doc actualizada.
