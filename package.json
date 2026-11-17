@@ -1,6 +1,6 @@
 {
 	"name": "gentle-bounty",
-	"version": "0.0.0",
+	"version": "0.1.0",
 	"private": true,
 	"description": "Bug bounty control infrastructure for Pi: scope gate, rate limiting, hash-chained evidence, redaction, reports.",
 	"license": "UNLICENSED",
@@ -11,7 +11,9 @@
 	"scripts": {
 		"test": "node --experimental-strip-types --test \"tests/**/*.test.ts\"",
 		"test:one": "node --experimental-strip-types --test",
-		"test:live": "node --experimental-strip-types scripts/smoke-live.mjs"
+		"test:live": "node --experimental-strip-types scripts/smoke-live.mjs",
+		"engram:install": "bash engram/bin/install.sh",
+		"engram:up": "bash engram/bin/engram-bounty up"
 	},
 	"pi": {
 		"extensions": [
@@ -20,9 +22,14 @@
 	},
 	"files": [
 		"assets/",
+		"bin/",
+		"config.example.json",
 		"docs/",
+		"engram/",
 		"extensions/",
+		"odd/",
 		"scripts/",
-		"src/"
+		"src/",
+		"scope.template.yaml"
 	]
 }

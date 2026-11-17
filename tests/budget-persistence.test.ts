@@ -10,10 +10,12 @@ import { join } from "node:path";
 
 import { createSession } from "../src/pi/session.ts";
 
-async function setup(dir: string, maxToolCalls: number) {
+const FIXED_NOW = () => Date.parse("2026-11-17T12:00:00Z");
+
+async function setup(dir: string, maxToolCalls: number, now?: () => number) {
 	const calls: string[][] = [];
 	const session = createSession(
-		{ root: dir, program: "lab", budget: { maxToolCalls } },
+		{ root: dir, program: "lab", budget: { maxToolCalls }, ...(now === undefined ? {} : { now }) },
 		{
 			dns: async () => ({ cname: [] }),
 			readFile: (path) => readFile(path, "utf8"),
@@ -91,19 +93,22 @@ test("a fresh program starts at zero and the default limit is 500, not 16", asyn
 
 test("S102: --restart-limits zeroes the counters, records it in the chain, and a reload resumes", async () => {
 	const { restartLimits } = await import("../scripts/restart-limits.ts");
+	// El reloj de la sesión y el del reset tienen que ser el mismo: si no, el límite de 8 h salta
+	// por la fecha real y el test se rompe solo con el correr del calendario.
+	const clock = FIXED_NOW;
 	const dir = await mkdtemp(join(tmpdir(), "bounty-restart-"));
 	try {
 		await mkdir(join(dir, "work", "lab"), { recursive: true });
 		const scopePath = join(dir, "scope.yaml");
 		await writeFile(scopePath, "program: lab\nlab: true\nauthorized_on: 2026-01-01\nin_scope:\n  - 127.0.0.1:3000\nlimits:\n  rate_rps: 500\n", "utf8");
-		const first = await setup(dir, 2);
+		const first = await setup(dir, 2, clock);
 		await first.session.scope({ file: scopePath, confirm: async () => true });
 		assert.equal((await run(first.session, "/a")).ok, true);
 		assert.equal((await run(first.session, "/b")).ok, true);
 		const third = await run(first.session, "/c");
 		assert.equal(third.ok, false, "the limit of 2 must stop the third call");
 
-		const restarted = await restartLimits(dir, "lab", () => Date.parse("2026-11-17T12:00:00Z"));
+		const restarted = await restartLimits(dir, "lab", clock);
 		assert.equal(restarted.reset, true);
 		assert.equal(restarted.previous?.toolCalls, 2);
 
