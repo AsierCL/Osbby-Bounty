@@ -76,13 +76,13 @@ sesión, incluidos los subagentes. No es pub/sub: se lee cuando consultás.
 `bounty_swarm` lanza subagentes con perspectivas distintas sobre el mismo programa. Cada rol tiene su
 allowlist, su sesión y su mandato; publica en la pizarra y muere. El padre agrega.
 
-- Roles: `recon-surface`, `authz-matrix`, `js-analyst`, `schema-auditor`, `skeptic`.
+- Roles: `js-analyzer`, `authz`, `schema`, `headers-config`.
 - **No repitas roles.** Dos veces el mismo rol es redundancia y gasta presupuesto sin cubrir nada nuevo.
 - **El ritmo es del programa.** Más agentes en paralelo no van más rápido: hacen cola en el mismo
   rate. Paralelizás el análisis, no el tráfico.
 - **El presupuesto es agregado.** Cuando el enjambre gasta el tope, los roles que faltan no se lanzan
   y queda escrito cuáles fueron.
-- El `skeptic` no busca vulnerabilidades: intenta refutar lo que los otros publicaron.
+- Todos publican en la pizarra; el padre agrega. El gate decide antes de lanzar ningún hijo.
 - **Ningún hijo verifica hallazgos.** La verificación sigue siendo del verificador independiente.
 
 ## Verificación

@@ -3,7 +3,11 @@
 Registro explícito de lo que se sabe roto o incompleto y **no** se está arreglando ahora, para que
 no viva solo en un informe de checkpoint.
 
-## 1. Skills de `gentle-pi` contaminan el contexto de bounty (S46, pospuesto)
+## 1. Skills de `gentle-pi` contaminan el contexto de bounty (S46, **resuelto**)
+
+Resuelto en el macrocambio swarm-blackboard: la sesión principal y los hijos arrancan con `-ne -ns`
+(sin extensiones ajenas y sin catálogo de skills), y el prompt de dominio documenta las tools nuevas.
+Se deja el historial abajo.
 
 Con `-ne` se apagan las **extensiones**, no las **skills** del paquete instalado: la sesión de bounty
 sigue viendo el catálogo de skills de desarrollo (branch-pr, judgment-day, skill-creator, …). Las
@@ -74,7 +78,10 @@ Riesgo: bajo. Afecta solo a programas que exijan un token con acentos dentro de 
 conocemos. No se arregla ahora: si aparece un caso real, la corrección es `normalize("NFC")` (o
 `toUpperCase()` con locale fijo) en la comparación, con test del caso concreto.
 
-## 6. El agente explora el repo en vez de cazar (S60, hipótesis, sin acción)
+## 6. El agente explora el repo en vez de cazar (S60, **resuelto**)
+
+Resuelto: `assets/identity.md` + `assets/protocol.md` se inyectan como sección del system prompt y
+el protocolo ordena no explorar el repo; la pizarra es el mapa. Se deja el historial abajo.
 
 **Síntoma observado** (tres corridas reales durante S43): en vez de llamar `bounty_run`, el modelo
 hizo `ls`, `find` y `read` sobre el repo. Una vez llamó `bounty_run` antes de que el scope terminara

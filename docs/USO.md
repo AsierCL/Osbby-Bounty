@@ -212,7 +212,7 @@ bounty_swarm { program: "acme", roles: ["authz-matrix", "js-analyst", "skeptic"]
 - Al volver, el orquestador ve el resumen por rol y lo nuevo de la pizarra desde el cursor de arranque.
 - Un hijo que falla no cancela a los demás.
 
-Roles disponibles: `recon-surface`, `authz-matrix`, `js-analyst`, `schema-auditor`, `skeptic`.
+Roles disponibles: `js-analyzer`, `authz`, `schema`, `headers-config`.
 Repetir un rol se rechaza: es redundancia, no cobertura.
 
 ## Varias cuentas: la matriz de autorización

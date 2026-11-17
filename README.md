@@ -39,6 +39,8 @@ bounty_scope { program: "acme", file: "work/acme/scope.yaml" }
 bounty_run   { program: "acme", tool: "httpx", args: ["-u","https://a.acme.com"], target: "https://a.acme.com" }
 bounty_phase { program: "acme", phase: "recon" }
 bounty_status{ program: "acme" }
+bounty_blackboard { program: "acme", action: "publish", category: "endpoint", target: "https://a.acme.com/api" }
+bounty_swarm  { program: "acme", target: "https://a.acme.com" }
 ```
 
 Cada transición reescribe `work/<program>/status.md`: qué fase corre, qué se encontró, qué espera
