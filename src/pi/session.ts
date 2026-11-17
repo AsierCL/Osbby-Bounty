@@ -24,7 +24,8 @@ import { createPendingQueue, type PendingQueue } from "../core/pending.ts";
 import { injectMassAssignment, normalizeBurst } from "../core/mutation-helpers.ts";
 import { seedSessionHeaders } from "../core/session-seed.ts";
 import { tokenStatus } from "../core/session-token.ts";
-import { parseReconOutput, summarizeRecon } from "../core/recon-tools.ts";
+import { filterAlive, parseReconOutput, summarizeRecon } from "../core/recon-tools.ts";
+import { classifyTarget, isHighValue, reserveFor } from "../core/priority.ts";
 import { requestViewForModel, responseViewForModel, type RedactionMode } from "../core/redact.ts";
 import { describeRequiredHeaders, parseScope, evaluate, summarizeScope, type ScopePolicy } from "../core/scope.ts";
 import { scoreVector } from "../core/cvss.ts";
@@ -220,6 +221,16 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 		};
 		await status.write(state);
 	}
+	/** S104: a bare target (`acme.com`, `www.acme.com:443`) has no URL to parse; keep a safe path. */
+	function pathOf(target: string): string {
+		try {
+			return new URL(target).pathname;
+		} catch {
+			const withoutHost = target.replace(/^[^/]*/, "");
+			return withoutHost.length > 0 ? withoutHost : "/";
+		}
+	}
+
 	async function ensureBudgetRestored(): Promise<void> {
 		if (budgetRestored) return;
 		budgetRestored = true;
@@ -530,6 +541,16 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				const blocked = await noteBlock("no scope loaded");
 				return blocked ?? { ok: false, text: (error as Error).message };
 			}
+			// S104: a program behind a hard WAF needs the human's session before anything runs.
+			if (current.requiresSession) {
+				const seeded = await deps.readFile(join(workspace, "session.headers")).catch(() => null);
+				if (seeded === null || seeded.trim().length === 0) {
+					return {
+						ok: false,
+						text: `El programa exige sesión inyectada (requires_session) y no hay work/${config.program}/session.headers. El operador inicia sesión en su navegador y deja ahí las cookies/storageState; no se intenta login automatizado.`,
+					};
+				}
+			}
 			// S78/task 2: `args` is what the tool receives, never the tool name. A model that repeats the
 			// tool inside args once produced `curl curl …`, and curl fetched both positionally: the gate
 			// validated both (it validates every host-shaped token), but the recorded argv lied.
@@ -737,7 +758,7 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				if (!reservation.allowed) {
 					await status.note(`frenado por ritmo: ${reservation.reason}`);
 					await refresh();
-					const blocked = await noteBlock(`rate: ${reservation.reason}`, new URL(input.target).pathname);
+					const blocked = await noteBlock(`rate: ${reservation.reason}`, pathOf(input.target));
 					return blocked ?? { ok: false, text: `Frenado por el límite del programa: ${reservation.reason}` };
 				}
 				if (reservation.delayMs > 0) await new Promise((resolve) => setTimeout(resolve, reservation.delayMs));
@@ -761,7 +782,7 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				const perHostCapBurst = current.limits.maxRequestsPerHost ?? MAX_PER_HOST_DEFAULT;
 				const usedBurst = hostCounts.get(primaryHost) ?? 0;
 				if (usedBurst + burst > perHostCapBurst) {
-					const blocked = await noteBlock(`per-host cap on ${primaryHost}`, new URL(input.target).pathname);
+					const blocked = await noteBlock(`per-host cap on ${primaryHost}`, pathOf(input.target));
 					return blocked ?? {
 						ok: false,
 						text: `La ráfaga de ${burst} no entra en el tope por host (${usedBurst}/${perHostCapBurst}). Probá menos o esperá otra corrida.`,
@@ -769,7 +790,7 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				}
 				hostCounts.set(primaryHost, usedBurst + burst);
 				const burstId = randomUUID();
-				const endpointPath = new URL(input.target).pathname;
+				const endpointPath = pathOf(input.target);
 				const outcomes = await Promise.all(
 					Array.from({ length: burst }, async (_unused, index) => {
 						if (limiter !== null) {
@@ -827,8 +848,17 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			}
 			const perHostCap = current.limits.maxRequestsPerHost ?? MAX_PER_HOST_DEFAULT;
 			const used = hostCounts.get(primaryHost) ?? 0;
+			// S104: the last slice of the host budget is reserved for API/GraphQL/critical flows.
+			const targetPriority = classifyTarget(pathOf(input.target));
+			const reserved = reserveFor(perHostCap);
+			if (!isHighValue(pathOf(input.target)) && used >= perHostCap - reserved) {
+				return {
+					ok: false,
+					text: `Presupuesto del host reservado: quedan ${perHostCap - used} de ${perHostCap} y el objetivo es una ${targetPriority.kind} (prioridad ${targetPriority.score}). Esas llamadas se guardan para API/GraphQL y flujos críticos; pivotá a un endpoint de alto valor o esperá otra corrida.`,
+				};
+			}
 			if (used >= perHostCap) {
-				const blocked = await noteBlock(`per-host cap on ${primaryHost}`, new URL(input.target).pathname);
+				const blocked = await noteBlock(`per-host cap on ${primaryHost}`, pathOf(input.target));
 				return (
 					blocked ?? {
 						ok: false,
@@ -850,7 +880,7 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			await persistBudget(null);
 
 			const executionAt = new Date(now()).toISOString();
-			const endpoint = new URL(input.target).pathname;
+			const endpoint = pathOf(input.target);
 			await evidence.append({
 				kind: "execution",
 				payload: {
@@ -952,6 +982,45 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 					...(decision.notes.length > 0 ? [`Notas del gate: ${decision.notes.join("; ")}`] : []),
 					...(reconSummary === null ? [] : [`Recon (${input.reconTool}): ${reconSummary} — quedó como recon-intelligence en la cadena.`]),
 					`La salida cruda quedó en el evidence store de ${evidenceDir}.`,
+				].join("\n"),
+			};
+		},
+
+		/**
+		 * S104: Phase 0 as one step. subfinder lists names, httpx checks which are alive, and only the
+		 * live subset (2xx/3xx/401/403) is handed to the agent. Both tools still go through the gate.
+		 */
+		async reconPipeline(input: { domain: string }): Promise<ToolResult> {
+			const subdomains = await this.run({ tool: "subfinder", args: ["-d", input.domain, "-silent"], target: input.domain, reconTool: "subfinder" });
+			if (!subdomains.ok) return { ok: false, text: `subfinder no corrió: ${subdomains.text.split("\n")[0]}` };
+			const list = (await evidence.read())
+				.filter((record) => record.kind === "recon-intelligence")
+				.map((record) => record.payload as { tool?: string; entries?: { kind: string; value: string }[] })
+				.filter((payload) => payload.tool === "subfinder")
+				.at(-1)?.entries ?? [];
+			const hosts = list.filter((entry) => entry.kind === "host").map((entry) => entry.value);
+			if (hosts.length === 0) return { ok: true, text: "subfinder no devolvió subdominios: no hay fase 0 que filtrar." };
+			const listPath = join(workspace, "subdomains.txt");
+			await writeFile(listPath, hosts.join("\n") + "\n", "utf8");
+			const probeTarget = hosts[0] ?? input.domain;
+			const probed = await this.run({ tool: "httpx", args: ["-l", listPath, "-json", "-silent"], target: probeTarget, reconTool: "httpx" });
+			if (!probed.ok) return { ok: false, text: `httpx no corrió: ${probed.text.split("\n")[0]}` };
+			const httpxPayload = (await evidence.read())
+				.filter((record) => record.kind === "recon-intelligence")
+				.map((record) => record.payload as { tool?: string; entries?: Parameters<typeof filterAlive>[0] })
+				.filter((payload) => payload.tool === "httpx")
+				.at(-1);
+			const alive = filterAlive(httpxPayload?.entries ?? []);
+			const alivePath = join(workspace, "alive-hosts.json");
+			await writeFile(alivePath, `${JSON.stringify(alive, null, 1)}\n`, "utf8");
+			await evidence.append({ kind: "recon-intelligence", payload: { tool: "phase-0", subdomains: hosts.length, alive: alive.length, entries: alive } });
+			await refresh(`Fase 0 lista: ${alive.length} host(s) vivos de ${hosts.length} subdominio(s).`);
+			return {
+				ok: true,
+				text: [
+					`Fase 0: ${hosts.length} subdominio(s) → ${alive.length} vivo(s) (2xx/3xx/401/403).`,
+					...alive.slice(0, 15).map((host) => `- ${host.status} ${host.url}${host.title === undefined ? "" : ` — ${host.title}`}`),
+					`El subconjunto limpio quedó en work/${config.program}/alive-hosts.json y como recon-intelligence.`,
 				].join("\n"),
 			};
 		},

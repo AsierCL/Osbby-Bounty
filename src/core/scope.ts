@@ -70,6 +70,11 @@ export interface ScopePolicy {
 	 * owns every address behind the name.
 	 */
 	allowPrivate: boolean;
+	/**
+	 * S104: the program is behind a hard WAF and the operator must inject a browser session before any
+	 * run. `bounty_run` refuses until work/<program>/session.headers exists.
+	 */
+	requiresSession: boolean;
 	automation: AutomationPolicy;
 	notes: string | null;
 }
@@ -94,6 +99,7 @@ const TOP_LEVEL_KEYS = new Set([
 	"limits",
 	"required_headers",
 	"allow_private",
+	"requires_session",
 	"automation",
 	"notes",
 ]);
@@ -491,6 +497,11 @@ export function parseScope(text: string): ScopeParseResult {
 	}
 
 	const requiredHeaders = asRequiredHeaders(doc.required_headers, errors);
+	let requiresSession = false;
+	if (doc.requires_session !== undefined) {
+		if (doc.requires_session !== "true" && doc.requires_session !== "false") errors.push(`requires_session must be "true" or "false"`);
+		else requiresSession = doc.requires_session === "true";
+	}
 	let allowPrivate = false;
 	if (doc.allow_private !== undefined) {
 		if (doc.allow_private !== "true" && doc.allow_private !== "false") errors.push(`allow_private must be "true" or "false"`);
@@ -534,6 +545,7 @@ export function parseScope(text: string): ScopeParseResult {
 			limits,
 			requiredHeaders,
 			allowPrivate,
+			requiresSession,
 			automation,
 			notes,
 		},
@@ -609,6 +621,7 @@ export function summarizeScope(policy: ScopePolicy, warnings: string[] = [], amb
 		`Ritmo declarado: ${policy.limits.rateRps ?? "sin declarar"} req/s`,
 		`Tope por host: ${policy.limits.maxRequestsPerHost ?? "sin declarar (300 por defecto)"} ejecuciones`,
 		`Métodos: ${policy.limits.allowedMethods.join(", ") || "sin restricción"}`,
+		...(policy.requiresSession ? ["Sesión obligatoria: inyectá work/<programa>/session.headers antes de correr nada"] : []),
 		...(() => {
 			const headers = describeRequiredHeaders(policy);
 			return headers.length === 0 ? [] : [`Headers obligatorios: ${headers}`];

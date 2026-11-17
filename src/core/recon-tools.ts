@@ -73,3 +73,27 @@ export function summarizeRecon(entries: ReconEntry[]): string {
 	}, {});
 	return Object.entries(counts).map(([kind, count]) => `${count} ${kind}`).join(", ") || "sin resultados";
 }
+
+/**
+ * S104: Phase 0. subfinder gives names, httpx says which ones exist, and only the live ones reach the
+ * agent. Keep 2xx/3xx/401/403 (401/403 mean alive and interesting); drop 5xx, other 4xx and anything
+ * with no status.
+ */
+export interface AliveHost {
+	url: string;
+	status: number;
+	title?: string;
+	technologies?: string[];
+}
+
+export function filterAlive(entries: ReconEntry[]): AliveHost[] {
+	const alive: AliveHost[] = [];
+	for (const entry of entries) {
+		if (entry.kind !== "url" || entry.status === undefined) continue;
+		const status = entry.status;
+		const keep = (status >= 200 && status < 400) || status === 401 || status === 403;
+		if (!keep) continue;
+		alive.push({ url: entry.value, status, ...(entry.title === undefined ? {} : { title: entry.title }), ...(entry.technologies === undefined ? {} : { technologies: entry.technologies }) });
+	}
+	return alive;
+}

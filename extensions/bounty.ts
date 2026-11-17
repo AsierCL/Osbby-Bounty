@@ -479,6 +479,26 @@ export default function bountyExtension(pi: PiLike): void {
 	});
 
 	pi.registerTool({
+		name: "bounty_recon",
+		label: "Bounty phase 0",
+		description:
+			"Phase 0: run subfinder, then httpx, and keep only the live hosts (2xx/3xx/401/403) as the target list. Both tools go through the gate and the rate; the clean subset lands in work/<program>/alive-hosts.json and as recon-intelligence.",
+		parameters: {
+			type: "object",
+			additionalProperties: false,
+			properties: { program: { type: "string" }, domain: { type: "string", description: "The in-scope domain to enumerate." } },
+			required: ["program", "domain"],
+		} as never,
+		async execute(_toolCallId, params) {
+			const resolved = resolveProgram(params.program);
+			if (!resolved.ok) return text(resolved.text, { ok: false });
+			const session = await sessionFor(resolved.program);
+			const result = await session.reconPipeline({ domain: String(params.domain) });
+			return text(result.text, { ok: result.ok });
+		},
+	});
+
+	pi.registerTool({
 		name: "bounty_pending",
 		label: "Bounty pending destructive",
 		description:

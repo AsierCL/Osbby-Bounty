@@ -202,3 +202,28 @@ destructiva: `infra-probing-via-proxy`. Pausa siempre.
 
 Y **no hereda ninguna autorización previa**: que el humano haya aprobado "probar las mutaciones" no dice
 nada sobre sondear el backend. Cada acción de esta clase pide su propia confirmación, con su propio texto.
+
+## Fase 0: reconocimiento quirúrgico (S104)
+
+Antes de auditar nada, el objetivo se filtra:
+
+1. `bounty_recon domain="acme.com"` corre **subfinder** (nombres) y después **httpx** (vivos).
+2. Solo entra a la lista lo que responde **2xx, 3xx, 401 o 403**. Los 5xx y los que no responden se
+   descartan: no se audita un host muerto.
+3. El subconjunto limpio queda en `work/<programa>/alive-hosts.json` y como `recon-intelligence`.
+
+Trabajás **sobre esa lista**, no sobre lo que te acordás del scope.
+
+## Autenticación: el login lo hace el humano (S104)
+
+En aplicaciones con WAF duro no se intenta login automatizado desde cero: dispara el anti-bot, quema la
+cuenta y no da evidencia. Si el scope declara `requires_session: true`, `bounty_run` **se niega** a correr
+hasta que exista `work/<programa>/session.headers` (cookies o Bearer) — el operador inicia sesión en su
+navegador y lo deja ahí. Con la sesión inyectada, probás la lógica; sin ella, no insistes.
+
+## Presupuesto: primero lo que vale (S104)
+
+El arnés clasifica el endpoint: `graphql`, `api`, `privilege`, `purchase`, `auth` valen más que una página.
+El último 20% del tope por host queda **reservado** para esos objetivos: cuando queda poco, una página se
+rechaza con "presupuesto del host reservado" y la llamada se guarda para la API. Si querés gastar en
+contenido, decilo y se ajusta el tope.
