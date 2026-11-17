@@ -164,3 +164,12 @@ Queda como condición de uso: Pi necesita `ENGRAM_URL=http://127.0.0.1:7437` o
 `ENGRAM_BIN=<repo>/engram/portable/bin/engram` en su entorno y un reinicio; sin eso sigue comparando
 contra el binario 3.4.0 de `~/.local/bin` y falla cerrado por ownership. No se reemplazó ese binario ni
 se migró su base: son decisiones del operador.
+
+Dos condiciones más, verificadas en la prueba:
+
+- **Auto-arranque del plugin.** Sin servidor en 7437, el plugin arranca `~/.local/bin/engram` (3.4.0) y
+  se queda con el puerto; el contenedor sale. Con `ENGRAM_URL` exportada no auto-arranca.
+- **Proyecto ambiguo.** La raíz del workspace tiene varios repos git, así que `/project/current`
+  devuelve `ambiguous project` y `project: ""`. El espejo quedó escrito con `project: "GentleBounty"`;
+  para leerlo desde Pi hay que pasar ese proyecto explícito. Arreglo durable: detectar proyecto por el
+  repo que corresponde, o fijar el proyecto en la config del plugin.
