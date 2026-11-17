@@ -149,3 +149,18 @@ adoptaba el `GENTLE_BOUNTY_SESSION_ID` que genera el runner, así que sus regist
 llevaban otro id. Corregido en `extensions/bounty.ts`; el segundo intento aplicó el veredicto.
 **Deuda**: no hay test unitario de ese cable (solo el flujo vivo lo demostró), porque requiere un
 `pi` real. Se cubre con el flujo cuando corra de nuevo.
+
+## 12. Engram: 404 del contrato — **resuelto con stack portable**
+
+El proveedor de memoria exige `GET /health` y `GET /runtime-contract` (`engram.pi-http-runtime/v1`),
+que sirve solo `engram serve` en el runtime local. En esta máquina había un `engram serve` 3.4.0 viejo
+en 7437 (sin la ruta del contrato) y ningún runtime actual.
+
+Resuelto: `engram/portable/` levanta el runtime local en Docker (`network_mode: host`, datos en
+`engram/portable/data/`), sin servicio permanente. Verificado: contrato 200, `POST /sessions` y
+`POST /observations` 201, y la observación sobrevive a un `down`/`up`.
+
+Queda como condición de uso: Pi necesita `ENGRAM_URL=http://127.0.0.1:7437` o
+`ENGRAM_BIN=<repo>/engram/portable/bin/engram` en su entorno y un reinicio; sin eso sigue comparando
+contra el binario 3.4.0 de `~/.local/bin` y falla cerrado por ownership. No se reemplazó ese binario ni
+se migró su base: son decisiones del operador.

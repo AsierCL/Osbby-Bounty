@@ -186,3 +186,15 @@ La pizarra ya estaba implementada como `src/core/board.ts` + `bounty_board` (25 
 
 El espejo no se pudo escribir: `missing or unavailable contract (HTTP 404)`, esperado
 `engram.pi-http-runtime/v1`. Deuda declarada en `docs/DEUDA.md`; el repo es la fuente.
+
+### L9 — Engram portable en Docker
+
+- `engram/portable/`: compose (runtime local `serve`, `network_mode: host`, `restart: "no"`), volumen
+  `data/`, script `bin/engram-portable` (up/down/status/logs/cli) y shim `bin/engram` para el host.
+- Diagnóstico: el 404 era un `engram serve` 3.4.0 viejo en 7437, sin `/runtime-contract`; el plugin
+  necesita ese endpoint y falla cerrado.
+- Verificado: `/health` 200, `/runtime-contract` 200, `POST /sessions` 201, `POST /observations` 201 y
+  la observación sobrevive a `down`/`up`.
+- El espejo de este documento y el de `docs/DEUDA.md` siguen pendientes de Pi: este proceso cargó el
+  entorno al arrancar y compara contra el binario 3.4.0. Se escribe en la próxima sesión con
+  `ENGRAM_URL` o `ENGRAM_BIN` exportados.
