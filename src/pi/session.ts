@@ -25,6 +25,7 @@ import { injectMassAssignment, normalizeBurst } from "../core/mutation-helpers.t
 import { seedSessionHeaders, canSeedHeaders } from "../core/session-seed.ts";
 import { createRoleStore, normalizeRoleName } from "../core/roles.ts";
 import { createSharedBlackboard, type SharedBlackboard } from "../core/blackboard.ts";
+import { createRequestCache, isIdempotentRead, methodFromArgs, requestSignature, statusOf } from "../core/request-cache.ts";
 import { tokenStatus } from "../core/session-token.ts";
 import { filterAlive, parseReconOutput, summarizeRecon } from "../core/recon-tools.ts";
 import { classifyTarget, isHighValue, reserveFor } from "../core/priority.ts";
@@ -55,6 +56,8 @@ export interface ProgramConfig {
 	reportRedact?: boolean;
 	/** S75/task 3f: written report language. Operator-level, default "en". */
 	reportLang?: "en" | "es";
+	/** S7: opt-in short-lived cache of idempotent reads for this session. */
+	cache?: boolean;
 	now?: () => number;
 }
 
@@ -118,6 +121,8 @@ export interface ProgramSession {
 		technique?: string;
 		method?: string;
 		followRedirects?: boolean;
+		/** S8: force real traffic; the verifier always uses it. */
+		bypassCache?: boolean;
 		/** S106: which role session to inject (work/<program>/sessions/<role>.headers). */
 		role?: string;
 		/** Per-call confirmation, so the adapter can hand over the live UI callback. */
@@ -204,6 +209,9 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 	const redaction: RedactionMode = config.redaction ?? "off";
 	const sessionId = config.sessionId ?? randomUUID();
 	const blackboard = createSharedBlackboard({ dir: workspace, program: config.program, clock: now });
+	// S7: the cache is opt-in. Repeating a request is part of some flows (two reproductions, loop
+	// detection); a session that wants the cache asks for it, the launcher does.
+	const requestCache = config.cache === true ? createRequestCache({ dir: workspace, program: config.program, clock: now }) : null;
 	const invocationToken = config.invocationToken ?? null;
 	const reportRedact = config.reportRedact ?? true;
 	const reportLang: "en" | "es" = config.reportLang ?? "en";
@@ -779,6 +787,39 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				await refresh("Ejecuto la acción destructiva que confirmaste.");
 			}
 
+			// S7/S8: a cacheable read that is already answered costs no rate token, no budget and no
+			// subprocess. This is placed before the limiter on purpose: a coalesced waiter must not reserve.
+			const cacheMethod = input.method ?? methodFromArgs(args);
+			const cacheHeaders = headersFromArgs(args);
+			const cacheAuth = [cacheHeaders.authorization ?? "", cacheHeaders.cookie ?? "", roleName ?? ""].join("|");
+			const bypassCache = input.bypassCache === true || deps.env?.GENTLE_BOUNTY_BYPASS_CACHE === "1";
+			const cacheable = requestCache !== null && input.burst === undefined && !bypassCache && isIdempotentRead(cacheMethod);
+			const cacheSignature = cacheable ? requestSignature(cacheMethod, input.target, cacheAuth) : "";
+			let cacheTracker: { finish(entry: { signature: string; method: string; url: string; status: number | null; stdout: string; stderr: string; at: string }): Promise<void>; fail(error: Error): void } | null = null;
+			if (cacheable && requestCache !== null) {
+				const cached = await requestCache.lookup(cacheSignature);
+				const note = async (entry: { status: number | null; stdout: string }, source: string) => {
+					await evidence.append({ kind: "recon-note", payload: { cacheHit: true, source, method: cacheMethod, target: input.target, status: entry.status, sessionId } });
+					return {
+						ok: entry.status === null || entry.status < 400 || entry.status === 401 || entry.status === 403,
+						text: [
+							`[cacheHit: true] ${cacheMethod} ${input.target} — no se tocó la red, no se gastó ritmo ni presupuesto (${source}).`,
+							`Estado: ${entry.status ?? "sin estado HTTP"}.`,
+							entry.stdout.slice(0, 4000) || "(sin cuerpo guardado)",
+							"Si necesitás tráfico real (reproducir, condición de carrera), repetí con bypassCache.",
+						].join("\n"),
+					};
+				};
+				if (cached !== null) return await note(cached, "caché del programa");
+				const pending = requestCache.inFlight(cacheSignature);
+				if (pending !== undefined) {
+					const shared = await pending.catch(() => null);
+					if (shared !== null) return await note(shared, "coalescencia in-flight");
+				} else {
+					cacheTracker = requestCache.track(cacheSignature);
+				}
+			}
+
 			// S37: the wall clock is checked before anything else costs time or money.
 			const wallHit = budget.exceeded();
 			if (wallHit !== null) {
@@ -941,8 +982,18 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			try {
 				execution = await deps.runTool(argv);
 			} catch (error) {
+				cacheTracker?.fail(error as Error);
 				await evidence.append({ kind: "execution-error", payload: { tool: input.tool, error: (error as Error).message } });
 				return { ok: false, text: `No pude ejecutar ${input.tool}: ${(error as Error).message}` };
+			}
+			// S7: only a meaningful, cacheable response is stored; waiters get it without new traffic.
+			if (cacheTracker !== null && requestCache !== null) {
+				const storedStatus = statusOf(execution.stdout);
+				if (requestCache.isCacheable(cacheMethod, storedStatus)) {
+					await cacheTracker.finish({ signature: cacheSignature, method: cacheMethod, url: input.target, status: storedStatus, stdout: execution.stdout.slice(0, 4000), stderr: execution.stderr, at: new Date(now()).toISOString() });
+				} else {
+					cacheTracker.fail(new Error("response not cacheable"));
+				}
 			}
 
 			await evidence.append({

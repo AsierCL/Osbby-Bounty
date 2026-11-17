@@ -129,6 +129,7 @@ export default function bountyExtension(pi: PiLike): void {
 				budget: config?.budget,
 				reportRedact: config?.reportRedact ?? true,
 				reportLang: config?.reportLang ?? "en",
+				cache: true,
 			},
 			{
 				dns: resolveForGate,
@@ -650,7 +651,8 @@ export default function bountyExtension(pi: PiLike): void {
 				agent: { name: "bounty-verify", tools },
 				task,
 				cwd: root,
-				env: { GENTLE_BOUNTY_ROOT: root, GENTLE_BOUNTY_PROGRAM: program },
+				// S8: the verifier's reproductions are real traffic, never a cached answer.
+				env: { GENTLE_BOUNTY_ROOT: root, GENTLE_BOUNTY_PROGRAM: program, GENTLE_BOUNTY_BYPASS_CACHE: "1" },
 				timeoutMs,
 			});
 			const verdict = parseVerdict(result.output);
