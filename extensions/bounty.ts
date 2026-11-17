@@ -11,10 +11,13 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
-import { resolve4, resolve6, resolveCname } from "node:dns/promises";
-import { isIP } from "node:net";
 
-import { createSession, type ProgramSession, type ToolExecution } from "../src/pi/session.ts";
+import { createSession, type ProgramSession } from "../src/pi/session.ts";
+import { runProcess } from "../src/pi/process.ts";
+import { resolveForGate } from "../src/pi/dns.ts";
+import { createJobStore } from "../src/core/jobs.ts";
+import { listJobs } from "../src/pi/recon-job.ts";
+import { renderJob } from "../src/core/jobs.ts";
 import { loadGlobalConfig, type GlobalConfig } from "../src/core/config.ts";
 import { buildDomainPrompt } from "../src/pi/prompt.ts";
 import { createPiRunner } from "../src/pi/runner.ts";
@@ -51,74 +54,12 @@ interface PiLike {
 	}): void;
 }
 
-const TOOL_TIMEOUT_MS = 10 * 60 * 1000;
-
 function text(value: string, details: Record<string, unknown> = {}) {
 	return { content: [{ type: "text" as const, text: value }], details };
 }
 
 function redactionMode(): RedactionMode {
 	return process.env.GENTLE_BOUNTY_REDACTION === "on" ? "on" : "off";
-}
-
-/**
- * DNS answer for the gate (S87): the CNAME chain AND the final addresses. No record is a valid
- * answer; a resolver failure is not, and a name with no address is a failure too (fail closed).
- */
-async function resolveForGate(host: string): Promise<{ cname: string[]; addresses: string[] } | { error: string }> {
-	if (isIP(host) !== 0 || host === "localhost") return { cname: [], addresses: [] };
-	const soft = new Set(["ENODATA", "ENOTFOUND", "ENOTIMP", "ESERVFAIL", "EREFUSED"]);
-	const codeOf = (error: unknown) => (error as { code?: string }).code ?? "unknown";
-
-	let cname: string[] = [];
-	try {
-		cname = await resolveCname(host);
-	} catch (error) {
-		const code = codeOf(error);
-		if (!soft.has(code)) return { error: code };
-	}
-
-	const addresses: string[] = [];
-	for (const resolve of [resolve4, resolve6]) {
-		try {
-			addresses.push(...(await resolve(host)));
-		} catch (error) {
-			const code = codeOf(error);
-			if (!soft.has(code)) return { error: code };
-		}
-	}
-	if (addresses.length === 0) return { error: `no address records for ${host}` };
-	return { cname, addresses };
-}
-
-function runProcess(argv: string[], cwd: string, toolPath: string[] = []): Promise<ToolExecution> {
-	return new Promise((resolve) => {
-		const [command, ...args] = argv;
-		if (!command) return resolve({ exitCode: 127, stdout: "", stderr: "no command" });
-		// B1: the child PATH is exactly the operator's tool_path plus the inherited PATH. The model
-		// never touches it: it comes from .bounty/config.json, which only the human edits.
-		const env = toolPath.length === 0
-			? process.env
-			: { ...process.env, PATH: [...toolPath, process.env.PATH ?? ""].filter(Boolean).join(":") };
-		const child = spawn(command, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
-		let stdout = "";
-		let stderr = "";
-		child.stdout.on("data", (chunk) => {
-			stdout += chunk.toString();
-		});
-		child.stderr.on("data", (chunk) => {
-			stderr += chunk.toString();
-		});
-		const timer = setTimeout(() => child.kill("SIGKILL"), TOOL_TIMEOUT_MS);
-		child.on("error", (error) => {
-			clearTimeout(timer);
-			resolve({ exitCode: 127, stdout, stderr: `${stderr}${error.message}` });
-		});
-		child.on("close", (code) => {
-			clearTimeout(timer);
-			resolve({ exitCode: code ?? 1, stdout, stderr });
-		});
-	});
 }
 
 // S68: the domain prompt is built once, from the assets, before any turn happens.
@@ -729,19 +670,78 @@ export default function bountyExtension(pi: PiLike): void {
 		name: "bounty_recon",
 		label: "Bounty phase 0",
 		description:
-			"Phase 0: run subfinder, then httpx, and keep only the live hosts (2xx/3xx/401/403) as the target list. Both tools go through the gate and the rate; the clean subset lands in work/<program>/alive-hosts.json and as recon-intelligence.",
+			"Phase 0: run subfinder, then httpx, and keep only the live hosts (2xx/3xx/401/403) as the target list. Both tools go through the gate and the rate; the clean subset lands in work/<program>/alive-hosts.json and as recon-intelligence. With background: true it runs as a separate job and returns at once, so a long enumeration does not block the session.",
 		parameters: {
 			type: "object",
 			additionalProperties: false,
-			properties: { program: { type: "string" }, domain: { type: "string", description: "The in-scope domain to enumerate." } },
+			properties: {
+				program: { type: "string" },
+				domain: { type: "string", description: "The in-scope domain to enumerate." },
+				background: { type: "boolean", description: "Run as a separate job (work/<program>/jobs/) and return the job id. Consult it with bounty_job." },
+			},
 			required: ["program", "domain"],
 		} as never,
 		async execute(_toolCallId, params) {
 			const resolved = resolveProgram(params.program);
 			if (!resolved.ok) return text(resolved.text, { ok: false });
-			const session = await sessionFor(resolved.program);
-			const result = await session.reconPipeline({ domain: String(params.domain) });
+			const program = resolved.program;
+			const session = await sessionFor(program);
+			const domain = String(params.domain);
+
+			if (params.background === true) {
+				const jobs = createJobStore({ workspace: session.paths.workspace });
+				const job = await jobs.create({ kind: "recon", program, subject: domain });
+				const script = fileURLToPath(new URL("../scripts/recon-job.ts", import.meta.url));
+				const scopePath = session.paths.scopeFile() ?? join(root, "work", program, "scope.yaml");
+				const child = spawn(process.execPath, ["--experimental-strip-types", script, program, domain, job.id, scopePath], {
+					cwd: root,
+					detached: true,
+					stdio: "ignore",
+					env: { ...process.env, GENTLE_BOUNTY_ROOT: root, GENTLE_BOUNTY_PROGRAM: program },
+				});
+				child.unref();
+				return text(
+					`Recon en segundo plano: job ${job.id} (${domain}).\nSigue con otra cosa y consultá el resultado con bounty_job { program: "${program}", action: "status", id: "${job.id}" }. El job carga el alcance ya confirmado, respeta el ritmo y escribe en la misma cadena.`,
+					{ ok: true, job: job.id },
+				);
+			}
+
+			const result = await session.reconPipeline({ domain });
 			return text(result.text, { ok: result.ok });
+		},
+	});
+
+	pi.registerTool({
+		name: "bounty_job",
+		label: "Bounty jobs",
+		description:
+			"List the program's background jobs (action=list) or read one (action=status, id). A job left running by a killed process is reported as failed, never as alive.",
+		parameters: {
+			type: "object",
+			additionalProperties: false,
+			properties: {
+				program: { type: "string" },
+				action: { type: "string", enum: ["list", "status"] },
+				id: { type: "string", description: "For status: the job id, J-<stamp>-<hex>." },
+			},
+			required: ["program", "action"],
+		} as never,
+		async execute(_toolCallId, params) {
+			const resolved = resolveProgram(params.program);
+			if (!resolved.ok) return text(resolved.text, { ok: false });
+			const session = await sessionFor(resolved.program);
+			const jobs = createJobStore({ workspace: session.paths.workspace });
+
+			if (params.action === "list") {
+				const list = await listJobs(jobs, Date.now());
+				if (list.length === 0) return text("No hay jobs en este programa.", { ok: true, count: 0 });
+				return text(list.map(renderJob).join("\n"), { ok: true, count: list.length });
+			}
+
+			if (params.id === undefined) return text("Falta el id del job.", { ok: false });
+			const job = await jobs.read(String(params.id));
+			if (job === null) return text(`No existe el job ${String(params.id)}.`, { ok: false });
+			return text(renderJob(job), { ok: job.state !== "failed" });
 		},
 	});
 

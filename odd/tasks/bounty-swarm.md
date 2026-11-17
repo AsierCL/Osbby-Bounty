@@ -147,5 +147,13 @@ Extracción sobre artefactos ya capturados: JS (rutas + parámetros), OpenAPI/Sw
 salida acotada a 200 entradas con conteo de descartadas, y secretos por ubicación y patrón, nunca por
 valor. Suite completa: 471 tests, 471 pass.
 
-Queda pendiente T6 (`bounty_recon` como job con estado persistido): cambia el ciclo de vida del proceso,
-por eso se hace como unidad propia y no al final de una sesión larga.
+### L8 — T6 entregada
+
+| Unidad | Commit | Evidencia |
+|---|---|---|
+| T6 | (este commit) | `src/core/jobs.ts`, `src/pi/recon-job.ts`, `scripts/recon-job.ts`, `background` en `bounty_recon`, tool `bounty_job`, `src/pi/process.ts` y `src/pi/dns.ts` compartidos, `tests/jobs.test.ts` + `tests/recon-job.test.ts` (14 tests) |
+
+Suite completa: 485 tests, 485 pass. Las seis unidades del plan están entregadas.
+
+Pendiente declarado: el job de recon **no corrió todavía en una sesión viva** (requiere subfinder/httpx y
+un alcance confirmado). El registro, las transiciones y el script están testeados; el proceso real, no.

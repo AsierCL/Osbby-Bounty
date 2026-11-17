@@ -266,6 +266,27 @@ dice cuántas descartó.
 sensible y no se usa para autenticarse.
 - Nada de red: el archivo tiene que existir, y tiene que estar dentro del workspace del programa.
 
+## Recon largo sin bloquear la sesión
+
+En un dominio grande, subfinder + httpx tardan. Con `background: true` corre como job en un proceso
+aparte:
+
+```
+bounty_recon { program: "acme", domain: "acme.com", background: true }
+# → Recon en segundo plano: job J-20261118103000-a1b2c3
+
+bounty_job { program: "acme", action: "status", id: "J-20261118103000-a1b2c3" }
+bounty_job { program: "acme", action: "list" }
+```
+
+- El job carga el alcance **ya confirmado**; si no lo está, falla y lo dice (no hay diálogo en un hijo).
+- Usa el mismo gate, el mismo ritmo compartido y la misma cadena de evidencia que la sesión.
+- Los estados son `queued`, `running`, `done`, `failed`, `stopped`. Un `running` sin señal por más de
+30 minutos se reporta `failed`.
+- Al terminar publica los hosts vivos en la pizarra.
+
+Los registros viven en `work/<programa>/jobs/`.
+
 ## Dónde vive todo
 
 ```
@@ -274,6 +295,7 @@ work/<programa>/
 ├── status.md     ← leelo, es tu panel
 ├── state.json    ← fase y pendientes
 ├── board/        ← pizarra del enjambre (descubrimientos + leases)
+├── jobs/         ← recon en segundo plano (estado por job)
 ├── findings/     ← un JSON por hallazgo
 ├── evidence/     ← log encadenado por hash + puntero de cabeza
 └── reports/      ← reportes generados

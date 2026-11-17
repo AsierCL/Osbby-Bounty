@@ -274,6 +274,16 @@ Antes de auditar nada, el objetivo se filtra:
 
 Trabajás **sobre esa lista**, no sobre lo que te acordás del scope.
 
+## Recon largo: en segundo plano (S108)
+
+`bounty_recon` con `background: true` lanza la fase 0 como job en un proceso aparte: carga el alcance
+ya confirmado, respeta el ritmo y escribe en la misma cadena. La sesión no queda bloqueada.
+
+- Consultá con `bounty_job { program, action: "status", id: "J-..." }`; la lista, con `action: "list"`.
+- Un job que quedó `running` porque el proceso murió se reporta `failed`, nunca como vivo.
+- Los hosts vivos que encuentra se publican en la pizarra: el enjambre arranca de ahí.
+- Un job es agenda, no autorización: no saltea gate, ni ritmo, ni confirmaciones.
+
 ## Autenticación: el login lo hace el humano (S104)
 
 En aplicaciones con WAF duro no se intenta login automatizado desde cero: dispara el anti-bot, quema la

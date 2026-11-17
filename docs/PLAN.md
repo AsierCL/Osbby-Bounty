@@ -106,9 +106,9 @@ a job con estado persistido y consulta posterior. La cadena de evidencia ya lo s
 | U3 | Capa 2: `bounty_swarm` + 4 roles | fan-out con presupuesto por rol y agregado; el padre agrega sin ver el razonamiento de los hijos | hecho (16 tests + `bounty_board`) |
 | U4 | Capa 3: `bounty_surface` | un bundle real produce endpoints en el board, con dedupe | hecho (11 tests) |
 | U5 | Capa 3: `bounty_session` | matriz de roles sin credenciales en argv | hecho (10 tests; archivo plano 0600) |
-| U6 | Capa 4: recon como job | la sesión no queda bloqueada; el job se consulta y se reanuda | pendiente |
+| U6 | Capa 4: recon como job | la sesión no queda bloqueada; el job se consulta y se reanuda | hecho (14 tests) |
 
-Estado a hoy: U1-U5 entregadas con tests y commits por unidad en `feat/bounty-swarm`. `bounty_board`
+Estado a hoy: U1-U6 entregadas con tests y commits por unidad en `feat/bounty-swarm`. `bounty_board`
 ya está disponible para el orquestador y para los hijos (allowlist de `runner.ts` y de
 `bin/gentle-bounty.mjs`).
 
