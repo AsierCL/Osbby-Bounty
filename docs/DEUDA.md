@@ -3,7 +3,11 @@
 Registro explícito de lo que se sabe roto o incompleto y **no** se está arreglando ahora, para que
 no viva solo en un informe de checkpoint.
 
-## 1. Skills de `gentle-pi` contaminan el contexto de bounty (S46, pospuesto)
+## 1. Skills de `gentle-pi` contaminan el contexto de bounty (S46, **resuelto**)
+
+Resuelto en el macrocambio swarm-blackboard: la sesión principal y los hijos arrancan con `-ne -ns`
+(sin extensiones ajenas y sin catálogo de skills), y el prompt de dominio documenta las tools nuevas.
+Se deja el historial abajo.
 
 Con `-ne` se apagan las **extensiones**, no las **skills** del paquete instalado: la sesión de bounty
 sigue viendo el catálogo de skills de desarrollo (branch-pr, judgment-day, skill-creator, …). Las
@@ -74,7 +78,10 @@ Riesgo: bajo. Afecta solo a programas que exijan un token con acentos dentro de 
 conocemos. No se arregla ahora: si aparece un caso real, la corrección es `normalize("NFC")` (o
 `toUpperCase()` con locale fijo) en la comparación, con test del caso concreto.
 
-## 6. El agente explora el repo en vez de cazar (S60, hipótesis, sin acción)
+## 6. El agente explora el repo en vez de cazar (S60, **resuelto**)
+
+Resuelto: `assets/identity.md` + `assets/protocol.md` se inyectan como sección del system prompt y
+el protocolo ordena no explorar el repo; la pizarra es el mapa. Se deja el historial abajo.
 
 **Síntoma observado** (tres corridas reales durante S43): en vez de llamar `bounty_run`, el modelo
 hizo `ls`, `find` y `read` sobre el repo. Una vez llamó `bounty_run` antes de que el scope terminara
@@ -142,3 +149,37 @@ adoptaba el `GENTLE_BOUNTY_SESSION_ID` que genera el runner, así que sus regist
 llevaban otro id. Corregido en `extensions/bounty.ts`; el segundo intento aplicó el veredicto.
 **Deuda**: no hay test unitario de ese cable (solo el flujo vivo lo demostró), porque requiere un
 `pi` real. Se cubre con el flujo cuando corra de nuevo.
+
+## 12. Engram: 404 del contrato — **resuelto con stack portable**
+
+El proveedor de memoria exige `GET /health` y `GET /runtime-contract` (`engram.pi-http-runtime/v1`),
+que sirve solo `engram serve` en el runtime local. En esta máquina había un `engram serve` 3.4.0 viejo
+en 7437 (sin la ruta del contrato) y ningún runtime actual.
+
+Resuelto: `engram/portable/` levanta el runtime local en Docker (`network_mode: host`, datos en
+`engram/portable/data/`), sin servicio permanente. Verificado: contrato 200, `POST /sessions` y
+`POST /observations` 201, y la observación sobrevive a un `down`/`up`.
+
+Queda como condición de uso: Pi necesita `ENGRAM_URL=http://127.0.0.1:7437` o
+`ENGRAM_BIN=<repo>/engram/portable/bin/engram` en su entorno y un reinicio; sin eso sigue comparando
+contra el binario 3.4.0 de `~/.local/bin` y falla cerrado por ownership. No se reemplazó ese binario ni
+se migró su base: son decisiones del operador.
+
+Dos condiciones más, verificadas en la prueba:
+
+- **Auto-arranque del plugin.** Sin servidor en 7437, el plugin arranca `~/.local/bin/engram` (3.4.0) y
+  se queda con el puerto; el contenedor sale. Con `ENGRAM_URL` exportada no auto-arranca.
+- **Proyecto ambiguo.** La raíz del workspace tiene varios repos git, así que `/project/current`
+  devuelve `ambiguous project` y `project: ""`. El espejo quedó escrito con `project: "GentleBounty"`;
+  para leerlo desde Pi hay que pasar ese proyecto explícito. Arreglo durable: detectar proyecto por el
+  repo que corresponde, o fijar el proyecto en la config del plugin.
+
+## 13. Dos Engram: sistema (7437) y bounty (7438)
+
+El Engram del sistema es el del agente de desarrollo. La herramienta de bounty tiene el suyo, con su
+propio contenedor y su base dentro del repo (`engram/`, ver `engram/README.md`), porque mover
+`gentle-bounty/` tiene que llevarse la herramienta completa.
+
+`bin/gentle-bounty.mjs` exporta `ENGRAM_URL=http://127.0.0.1:7438` (nunca hereda la del shell), levanta
+el stack con `ensure` antes de abrir Pi, y los subagentes lo heredan vía `runner.ts`. Para apagarlo:
+`GENTLE_BOUNTY_ENGRAM=off`. La memoria del bounty no se mezcla con la del sistema: son bases distintas.

@@ -181,6 +181,112 @@ runtime los reporta). Se configuran en `.bounty/config.json`:
 Al llegar al techo, el trabajo se detiene en orden y `status.md` lo dice. La evidencia ya escrita no
 se pierde.
 
+## Pizarra compartida: cómo se coordinan varios agentes
+
+Cuando varios subagentes trabajan sobre el mismo programa, `bounty_blackboard` es lo que evita que
+trabajen a ciegas o repitan lo mismo.
+
+- `bounty_blackboard { program, action: "since", cursor: 0 }` — qué se descubrió hasta ahora.
+- `publish` con `kind` (host, endpoint, param, hypothesis…), `target` y `data` chico. Es idempotente:
+  el mismo descubrimiento dos veces es un solo ítem.
+- `claim` antes de trabajar un ítem; el lease vence solo (10 min por defecto) y se puede renovar.
+- `release` cuando terminás, para que otro lo tome.
+- El autor es la sesión, no el texto: nadie puede publicar como otro.
+- La pizarra guarda **forma**, no contenido: el payload crudo va a la cadena de evidencia.
+
+La pizarra vive en `work/<programa>/` (`blackboard.json` + `claims.json`). Se lee bajo lock, igual
+que la evidencia, así que varios procesos del mismo programa no se pisan.
+
+## Enjambre: varios roles sobre el mismo programa
+
+```
+bounty_swarm { program: "acme", roles: ["authz-matrix", "js-analyst", "skeptic"],
+               focus: "el endpoint de facturas", max_parallel: 3, budget_tool_calls: 1200 }
+```
+
+- Cada rol recibe solo su mandato y su allowlist; no ve el razonamiento del orquestador ni el de los
+  otros roles.
+- `max_parallel` por defecto 3. Subirlo no acelera nada: el ritmo lo impone el programa.
+- `budget_tool_calls` es el techo **agregado**: cuando se agota, los roles restantes no se lanzan y el
+  resultado dice cuáles.
+- Al volver, el orquestador ve el resumen por rol y lo nuevo de la pizarra desde el cursor de arranque.
+- Un hijo que falla no cancela a los demás.
+
+Roles disponibles: `js-analyzer`, `authz`, `schema`, `headers-config`.
+Repetir un rol se rechaza: es redundancia, no cobertura.
+
+## Varias cuentas: la matriz de autorización
+
+Cuando el programa tiene cuentas de prueba (A, B, admin), cada una es **un archivo plano** que
+escribís vos:
+
+```bash
+node --experimental-strip-types scripts/set-role.ts acme user-a ./user-a.headers
+pbpaste | node --experimental-strip-types scripts/set-role.ts acme anonymous
+```
+
+El archivo queda en `work/acme/sessions/<rol>.headers` con permisos `0600`, dentro de `work/` (que ya
+está gitignoted). Formato: `Name: value` por línea, `#` para comentarios. El script te muestra los
+nombres de los headers y los avisos (por ejemplo, “no tiene Cookie ni Authorization”), nunca los
+valores.
+
+Dentro de la sesión:
+
+- `bounty_session { program: "acme", action: "list" }` — qué roles hay, con qué headers y cuándo se
+  actualizaron.
+- `bounty_session { program: "acme", action: "check", role: "user-a" }` — un rol en particular.
+- `bounty_run { ..., role: "user-a" }` — el mismo pedido con esa sesión. Si el archivo no existe se
+  rechaza; no se cae a anónimo en silencio. Solo funciona con `curl`.
+
+La credencial viaja en un config privado (`-K`), nunca en argv, así que la cadena de evidencia guarda
+el nombre del rol y el nombre de los headers, no el valor. La comparación entre roles es un bucle que
+hace el agente: mismo endpoint con `role: "anonymous"`, después con cada rol, y la diferencia va a la
+pizarra.
+
+> Decisión del operador (S106): archivo plano, host propio, cuentas de prueba descartables. Si algún
+día eso deja de ser cierto, esta es la pieza que hay que cambiar, no el resto.
+
+## De un bundle a endpoints: `bounty_surface`
+
+`bounty_surface` no descarga nada: trabaja sobre un archivo que ya está en `work/<programa>/files/`.
+
+```bash
+# 1. dentro de la sesión, capturás con curl a un archivo del workspace
+bounty_run { program: "acme", tool: "curl", args: ["-sS", "-o", "work/acme/files/main.js",
+            "https://a.acme.com/static/main.js"], target: "https://a.acme.com/static/main.js" }
+# 2. extraés la superficie
+bounty_surface { program: "acme", file: "files/main.js" }
+```
+
+- Acepta bundles JavaScript, OpenAPI/Swagger y una introspección GraphQL; detecta el formato solo.
+- Publica en la pizarra `path`, verbo y **nombres** de parámetros. Tope: 200 entradas por archivo, y te
+dice cuántas descartó.
+- Los archivos estáticos (`.js`, `.css`, imágenes, fuentes) no entran: no son superficie.
+- Un secreto se reporta por ubicación y patrón, nunca por valor. Si es de un tercero, va como hallazgo
+sensible y no se usa para autenticarse.
+- Nada de red: el archivo tiene que existir, y tiene que estar dentro del workspace del programa.
+
+## Recon largo sin bloquear la sesión
+
+En un dominio grande, subfinder + httpx tardan. Con `background: true` corre como job en un proceso
+aparte:
+
+```
+bounty_recon { program: "acme", domain: "acme.com", background: true }
+# → Recon en segundo plano: job J-20261118103000-a1b2c3
+
+bounty_job { program: "acme", action: "status", id: "J-20261118103000-a1b2c3" }
+bounty_job { program: "acme", action: "list" }
+```
+
+- El job carga el alcance **ya confirmado**; si no lo está, falla y lo dice (no hay diálogo en un hijo).
+- Usa el mismo gate, el mismo ritmo compartido y la misma cadena de evidencia que la sesión.
+- Los estados son `queued`, `running`, `done`, `failed`, `stopped`. Un `running` sin señal por más de
+30 minutos se reporta `failed`.
+- Al terminar publica los hosts vivos en la pizarra.
+
+Los registros viven en `work/<programa>/jobs/`.
+
 ## Dónde vive todo
 
 ```
@@ -188,6 +294,9 @@ work/<programa>/
 ├── scope.yaml    ← lo escribís vos
 ├── status.md     ← leelo, es tu panel
 ├── state.json    ← fase y pendientes
+├── board/        ← pizarra del enjambre (descubrimientos + leases)
+├── jobs/         ← recon en segundo plano (estado por job)
+├── (el Engram del bounty vive en engram/data/, fuera de work/)
 ├── findings/     ← un JSON por hallazgo
 ├── evidence/     ← log encadenado por hash + puntero de cabeza
 └── reports/      ← reportes generados

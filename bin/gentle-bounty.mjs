@@ -13,7 +13,7 @@
  * inspection path. The live tool list is checked by scripts/tools-probe.ts during a real run.
  */
 import { spawnSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -25,6 +25,10 @@ export const MAIN_SESSION_TOOLS = [
 	"bounty_scope",
 	"bounty_run",
 	"bounty_evidence",
+	"bounty_blackboard",
+	"bounty_session",
+	"bounty_surface",
+	"bounty_job",
 	"bounty_finding",
 	"bounty_phase",
 	"bounty_status",
@@ -32,6 +36,13 @@ export const MAIN_SESSION_TOOLS = [
 ];
 
 const FORBIDDEN = /bash|shell|exec|terminal|fetch|http|web|write|edit|\*/i;
+
+// La memoria de esta herramienta es SUYA. El Engram del sistema vive en 7437; este en 7438, con su
+// propio contenedor y su propia base dentro del repo. Nunca heredamos ENGRAM_URL del shell.
+const ENGRAM_DEFAULT_URL = "http://127.0.0.1:7438";
+function engramURL() {
+	return process.env.GENTLE_BOUNTY_ENGRAM_URL ?? ENGRAM_DEFAULT_URL;
+}
 
 export function buildLaunch({ program, root, probeFile, approvedMcp, extra = [] }) {
 	if (!program || program.includes("/") || program.includes("..")) {
@@ -62,6 +73,7 @@ export function buildLaunch({ program, root, probeFile, approvedMcp, extra = [] 
 		env: {
 			GENTLE_BOUNTY_ROOT: process.cwd(),
 			GENTLE_BOUNTY_PROGRAM: program,
+			ENGRAM_URL: engramURL(),
 			...(probeFile ? { GENTLE_BOUNTY_PROBE_FILE: join(workDir, "probe-tools.json") } : {}),
 		},
 	};
@@ -310,6 +322,15 @@ async function main(argv) {
 	if (check) {
 		console.log(JSON.stringify({ command: launch.command, args: launch.args, cwd: launch.cwd, env: launch.env, tools: MAIN_SESSION_TOOLS }, null, 2));
 		return;
+	}
+
+	// La memoria es parte de la herramienta: si su Engram no está, se levanta. Nunca se usa el del sistema.
+	if (process.env.GENTLE_BOUNTY_ENGRAM !== "off") {
+		const script = join(packageRoot, "engram", "bin", "engram-bounty");
+		if (existsSync(script)) {
+			const ensured = spawnSync(script, ["ensure"], { cwd: packageRoot, stdio: "inherit", env: { ...process.env, ENGRAM_PORT: process.env.GENTLE_BOUNTY_ENGRAM_PORT ?? "7438" } });
+			if (ensured.status !== 0) console.error("gentle-bounty: sigo sin memoria: el Engram del bounty no arrancó");
+		}
 	}
 
 	// B5: the verifier role no longer exists as an environment variable; never inherit one.

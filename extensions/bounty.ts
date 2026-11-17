@@ -7,19 +7,27 @@
  * the way gentle-pi does) follows `docs/extensions.md:90-103` and `extensions/gentle-agents.ts:2622`.
  * **It has not been executed inside a live Pi session yet** — that is the first thing Phase E does.
  */
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
-import { resolve4, resolve6, resolveCname } from "node:dns/promises";
-import { isIP } from "node:net";
 
-import { createSession, type ProgramSession, type ToolExecution } from "../src/pi/session.ts";
+import { createSession, type ProgramSession } from "../src/pi/session.ts";
+import { runProcess } from "../src/pi/process.ts";
+import { resolveForGate } from "../src/pi/dns.ts";
+import { createJobStore } from "../src/core/jobs.ts";
+import { listJobs } from "../src/pi/recon-job.ts";
+import { renderJob } from "../src/core/jobs.ts";
 import { loadGlobalConfig, type GlobalConfig } from "../src/core/config.ts";
 import { buildDomainPrompt } from "../src/pi/prompt.ts";
 import { createPiRunner } from "../src/pi/runner.ts";
 import { verifierTaskFor, parseVerdict } from "../src/pi/verifier.ts";
 import { createEvidenceStore } from "../src/core/evidence.ts";
+import { createSharedBlackboard } from "../src/core/blackboard.ts";
+import { createRoleStore, normalizeRoleName } from "../src/core/roles.ts";
+import { extractSurface, summarizeSurface, endpointBoardData, MAX_SURFACE_BYTES } from "../src/core/surface.ts";
+import { runBlackboardAction, type BlackboardAction } from "../src/pi/blackboard-tools.ts";
+import { runSwarm, SWARM_ROLES, summarizeSwarm, swarmTaskFor } from "../src/pi/swarm.ts";
 import { extractJsonArray } from "../src/core/json-extract.ts";
 import type { BountyPhase } from "../src/core/status.ts";
 import type { RedactionMode } from "../src/core/redact.ts";
@@ -46,74 +54,12 @@ interface PiLike {
 	}): void;
 }
 
-const TOOL_TIMEOUT_MS = 10 * 60 * 1000;
-
 function text(value: string, details: Record<string, unknown> = {}) {
 	return { content: [{ type: "text" as const, text: value }], details };
 }
 
 function redactionMode(): RedactionMode {
 	return process.env.GENTLE_BOUNTY_REDACTION === "on" ? "on" : "off";
-}
-
-/**
- * DNS answer for the gate (S87): the CNAME chain AND the final addresses. No record is a valid
- * answer; a resolver failure is not, and a name with no address is a failure too (fail closed).
- */
-async function resolveForGate(host: string): Promise<{ cname: string[]; addresses: string[] } | { error: string }> {
-	if (isIP(host) !== 0 || host === "localhost") return { cname: [], addresses: [] };
-	const soft = new Set(["ENODATA", "ENOTFOUND", "ENOTIMP", "ESERVFAIL", "EREFUSED"]);
-	const codeOf = (error: unknown) => (error as { code?: string }).code ?? "unknown";
-
-	let cname: string[] = [];
-	try {
-		cname = await resolveCname(host);
-	} catch (error) {
-		const code = codeOf(error);
-		if (!soft.has(code)) return { error: code };
-	}
-
-	const addresses: string[] = [];
-	for (const resolve of [resolve4, resolve6]) {
-		try {
-			addresses.push(...(await resolve(host)));
-		} catch (error) {
-			const code = codeOf(error);
-			if (!soft.has(code)) return { error: code };
-		}
-	}
-	if (addresses.length === 0) return { error: `no address records for ${host}` };
-	return { cname, addresses };
-}
-
-function runProcess(argv: string[], cwd: string, toolPath: string[] = []): Promise<ToolExecution> {
-	return new Promise((resolve) => {
-		const [command, ...args] = argv;
-		if (!command) return resolve({ exitCode: 127, stdout: "", stderr: "no command" });
-		// B1: the child PATH is exactly the operator's tool_path plus the inherited PATH. The model
-		// never touches it: it comes from .bounty/config.json, which only the human edits.
-		const env = toolPath.length === 0
-			? process.env
-			: { ...process.env, PATH: [...toolPath, process.env.PATH ?? ""].filter(Boolean).join(":") };
-		const child = spawn(command, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
-		let stdout = "";
-		let stderr = "";
-		child.stdout.on("data", (chunk) => {
-			stdout += chunk.toString();
-		});
-		child.stderr.on("data", (chunk) => {
-			stderr += chunk.toString();
-		});
-		const timer = setTimeout(() => child.kill("SIGKILL"), TOOL_TIMEOUT_MS);
-		child.on("error", (error) => {
-			clearTimeout(timer);
-			resolve({ exitCode: 127, stdout, stderr: `${stderr}${error.message}` });
-		});
-		child.on("close", (code) => {
-			clearTimeout(timer);
-			resolve({ exitCode: code ?? 1, stdout, stderr });
-		});
-	});
 }
 
 // S68: the domain prompt is built once, from the assets, before any turn happens.
@@ -183,6 +129,7 @@ export default function bountyExtension(pi: PiLike): void {
 				budget: config?.budget,
 				reportRedact: config?.reportRedact ?? true,
 				reportLang: config?.reportLang ?? "en",
+				cache: true,
 			},
 			{
 				dns: resolveForGate,
@@ -267,6 +214,10 @@ export default function bountyExtension(pi: PiLike): void {
 					enum: ["subfinder", "httpx", "katana", "nuclei", "gobuster"],
 					description: "Parse this recon tool's JSON/NDJSON output into structured recon-intelligence evidence.",
 				},
+				role: {
+					type: "string",
+					description: "Role session to inject (work/<program>/sessions/<role>.headers). curl only; the credential never enters argv.",
+				},
 			},
 			required: ["program", "tool", "args", "target"],
 		} as never,
@@ -289,6 +240,7 @@ export default function bountyExtension(pi: PiLike): void {
 				...(typeof params.burst === "number" ? { burst: params.burst } : {}),
 				...(params.mass_assignment === true ? { massAssignment: true } : {}),
 				...(params.recon_tool === undefined ? {} : { reconTool: String(params.recon_tool) }),
+				...(params.role === undefined ? {} : { role: String(params.role) }),
 				...(params.method === undefined ? {} : { method: String(params.method) }),
 				...(params.follow_redirects === undefined ? {} : { followRedirects: params.follow_redirects === true }),
 			});
@@ -321,6 +273,262 @@ export default function bountyExtension(pi: PiLike): void {
 				...(params.payload === undefined ? {} : { payload: params.payload }),
 			});
 			return text(result.text, { ok: result.ok });
+		},
+	});
+
+	pi.registerTool({
+		name: "bounty_surface",
+		label: "Bounty surface",
+		description:
+			"Extract the surface from an artifact that is already captured under work/<program>/: a JavaScript bundle, an OpenAPI/Swagger document or a GraphQL introspection. Publishes endpoints (path, method, parameter NAMES) to the board. No network; values of secrets are never read out.",
+		parameters: {
+			type: "object",
+			additionalProperties: false,
+			properties: {
+				program: { type: "string" },
+				file: { type: "string", description: "Path to the artifact, relative to work/<program>/ (for example files/main.js). It must already exist: bounty_surface never downloads anything." },
+			},
+			required: ["program", "file"],
+		} as never,
+		async execute(_toolCallId, params) {
+			const resolved = resolveProgram(params.program);
+			if (!resolved.ok) return text(resolved.text, { ok: false });
+			const session = await sessionFor(resolved.program);
+			const workspace = resolve(session.paths.workspace);
+			const candidate = resolve(workspace, String(params.file));
+			if (!candidate.startsWith(`${workspace}${sep}`)) {
+				return text(`El archivo tiene que estar dentro de work/${resolved.program}/. No se lee nada fuera del workspace del programa.`, { ok: false });
+			}
+
+			let bytes: Buffer;
+			try {
+				bytes = await readFile(candidate);
+			} catch {
+				return text(`No existe ${String(params.file)}. Capturalo primero con bounty_run (por ejemplo curl -o files/main.js) y volvé con el archivo ya en disco.`, { ok: false });
+			}
+			if (bytes.byteLength > MAX_SURFACE_BYTES) {
+				return text(`El archivo ocupa ${bytes.byteLength} bytes y el tope es ${MAX_SURFACE_BYTES}. Partilo o usá el esquema en vez del bundle.`, { ok: false });
+			}
+
+			const relative = candidate.slice(workspace.length + 1);
+			const report = extractSurface(bytes.toString("utf8"), relative);
+			const blackboard = createSharedBlackboard({ dir: session.paths.workspace, program: resolved.program });
+			let created = 0;
+			let known = 0;
+			const lines: string[] = [];
+			for (const endpoint of report.endpoints) {
+				const published = await blackboard.publish({ category: "endpoint", target: endpoint.path, data: endpointBoardData(endpoint), discoveredBy: session.sessionId });
+				if (published.created) {
+					created += 1;
+					if (lines.length < 15) lines.push(`+ ${endpoint.method === null ? "ruta" : endpoint.method} ${endpoint.path}${endpoint.params.length === 0 ? "" : ` (${endpoint.params.join(", ")})`}`);
+				} else known += 1;
+			}
+			for (const secret of report.secrets) {
+				// A secret value never enters the blackboard: it is recorded by location and pattern only.
+				await session.evidence({ action: "append", kind: "recon-note", payload: { secret: secret.location, pattern: secret.pattern, from: "bounty_surface" } });
+				lines.push(`! secreto en ${secret.location}: ${secret.pattern}`);
+			}
+
+			const body = [summarizeSurface(report), `Archivo: ${relative}`, `Pizarra: ${created} nuevo(s), ${known} ya conocido(s)`, "", ...lines].join("\n");
+			const secretNote = report.secrets.length === 0 ? "" : `\n\nUn secreto de un tercero se registra SIEMPRE como hallazgo sensible (bounty_finding, sensitive: true) y no se usa para autenticarse. El valor no está en la pizarra: quedó en el archivo.`;
+			return text(`${body}${secretNote}`, { ok: true, endpoints: report.endpoints.length, secrets: report.secrets.length, created, known, dropped: report.dropped });
+		},
+	});
+
+	pi.registerTool({
+		name: "bounty_session",
+		label: "Bounty role sessions",
+		description:
+			"List the role sessions the operator loaded for this program (action=list) or check one (action=check). It reports header NAMES, timestamps and warnings, never a value. A role is used as bounty_run role=<name>; the credential is injected through a private file, never argv.",
+		parameters: {
+			type: "object",
+			additionalProperties: false,
+			properties: {
+				program: { type: "string" },
+				action: { type: "string", enum: ["list", "check"] },
+				role: { type: "string", description: "For check: the role to inspect." },
+			},
+			required: ["program", "action"],
+		} as never,
+		async execute(_toolCallId, params) {
+			const resolved = resolveProgram(params.program);
+			if (!resolved.ok) return text(resolved.text, { ok: false });
+			const session = await sessionFor(resolved.program);
+			const roles = createRoleStore({ workspace: session.paths.workspace });
+
+			if (params.action === "list") {
+				const list = await roles.list();
+				if (list.length === 0) {
+					return text(
+						`No hay roles cargados. El operador crea work/${resolved.program}/sessions/<rol>.headers con un archivo plano (\`Name: value\` por línea, 0600). Roles típicos: anonymous, user-a, user-b, admin. No se inventa una sesión: sin archivo, no hay rol.`,
+						{ ok: true, count: 0 },
+					);
+				}
+				const lines = list.map(
+					(info) =>
+						`- ${info.role} · ${info.headerNames.length === 0 ? "sin headers" : info.headerNames.join(", ")} · ${info.updatedAt === null ? "sin fecha" : info.updatedAt}${info.warnings.length === 0 ? "" : ` · ${info.warnings.join("; ")}`}`,
+				);
+				return text(`Roles cargados:\n${lines.join("\n")}\n\nSe usan con bounty_run role=<rol>. Los valores nunca salen de su archivo.`, { ok: true, count: list.length });
+			}
+
+			if (params.role === undefined) return text("Falta el rol para revisar.", { ok: false });
+			let role: string;
+			try {
+				role = normalizeRoleName(String(params.role));
+			} catch (error) {
+				return text((error as Error).message, { ok: false });
+			}
+			const parsed = await roles.read(role);
+			if (parsed === null) {
+				return text(`El rol "${role}" no existe: falta work/${resolved.program}/sessions/${role}.headers. Lo escribe el operador, no el agente.`, { ok: false });
+			}
+			const warnings = parsed.headers.length === 0 ? ["vacío"] : [];
+			const names = [...new Set(parsed.headers.map((header) => header.name))];
+			const hasAuth = names.some((name) => /^(cookie|authorization)$/i.test(name));
+			if (!hasAuth) warnings.push("no tiene Cookie ni Authorization: probablemente no autentique nada");
+			return text(
+				`Rol ${role}: ${names.join(", ")}\nArchivo: sessions/${role}.headers · ${parsed.headers.length} header(s)${warnings.length === 0 ? " · sin avisos" : `\nAvisos: ${warnings.join("; ")}`}`,
+				{ ok: true, role, headerNames: names, warnings },
+			);
+		},
+	});
+
+	pi.registerTool({
+		name: "bounty_blackboard",
+		label: "Bounty blackboard",
+		description:
+			"Shared blackboard of the program. publish a structural discovery (idempotent by category+target+data, and it is logged as a recon-note in the evidence chain), query by category/target, claim an artifact before working on it, release it, or since a timestamp to see what the swarm found. The author is this session, never the text you pass.",
+		parameters: {
+			type: "object",
+			additionalProperties: false,
+			properties: {
+				program: { type: "string" },
+				action: { type: "string", enum: ["publish", "query", "claim", "release", "since"] },
+				category: { type: "string", enum: ["endpoint", "hidden_param", "auth_schema", "header_anomaly", "tech_fingerprint", "state_invariant"] },
+				target: { type: "string", description: "The normalized host or URL the artifact is about." },
+				data: { type: "object", description: "Small structured hint (≤4KB). Raw bytes belong in bounty_evidence." },
+				id: { type: "string", description: "Artifact id, for claim/release." },
+				ttl_ms: { type: "number", description: "Lease length for claim. Default 10 minutes." },
+				ts: { type: "string", description: "For since: ISO timestamp; return artifacts newer than it." },
+				limit: { type: "number", description: "For query: maximum artifacts to return." },
+			},
+			required: ["program", "action"],
+		},
+		async execute(_toolCallId, params) {
+			const resolved = resolveProgram(params.program);
+			if (!resolved.ok) return text(resolved.text, { ok: false });
+			const session = await sessionFor(resolved.program);
+			const result = await runBlackboardAction(session.blackboard, session.sessionId, {
+				action: params.action as BlackboardAction,
+				...(params.category === undefined ? {} : { category: params.category as never }),
+				...(params.target === undefined ? {} : { target: String(params.target) }),
+				...(params.data === undefined ? {} : { data: params.data as Record<string, unknown> }),
+				...(params.id === undefined ? {} : { id: String(params.id) }),
+				...(params.ttl_ms === undefined ? {} : { ttlMs: Number(params.ttl_ms) }),
+				...(params.ts === undefined ? {} : { ts: String(params.ts) }),
+				...(params.limit === undefined ? {} : { limit: Number(params.limit) }),
+			});
+			// S4: a new artifact is also a recon-note, so the discovery is in the chain of custody too.
+			let evidenceNote = "";
+			if (result.ok && result.details.created === true) {
+				const recorded = await session.evidence({
+					action: "append",
+					kind: "recon-note",
+					payload: { artifact: result.details.id, category: params.category, target: params.target, data: params.data ?? {}, from: "bounty_blackboard" },
+				});
+				evidenceNote = recorded.ok ? "\nAnotado en la cadena como recon-note." : `\nNo pude anotarlo en la cadena: ${recorded.text}`;
+			}
+			return text(`${result.text}${evidenceNote}`, { ok: result.ok, ...result.details });
+		},
+	});
+
+	pi.registerTool({
+		name: "bounty_swarm",
+		label: "Bounty swarm",
+		description:
+			"Deploy the orthogonal swarm over one in-scope target: js-analyzer, authz, schema, headers-config. The gate decides before any child exists; each child gets the blackboard snapshot, its own session and its own budget; the parent caps concurrency and aggregate calls, then returns the target artifacts and the candidate finding ids for bounty_verify.",
+		parameters: {
+			type: "object",
+			additionalProperties: false,
+			properties: {
+				program: { type: "string" },
+				target: { type: "string", description: "In-scope URL or host. It must pass the same gate as bounty_run." },
+				roles: { type: "array", items: { type: "string", enum: Object.keys(SWARM_ROLES) }, description: "Default: the four profiles. Repeating one is refused." },
+				max_parallel: { type: "number", description: "Simultaneous children. Default 3, hard cap 6." },
+				budget_tool_calls: { type: "number", description: "Aggregate tool calls across the swarm. Default 1200." },
+				per_agent_budget: { type: "number", description: "Per-child ceiling; a child over it is reported, not trusted." },
+			},
+			required: ["program", "target"],
+		} as never,
+		async execute(_toolCallId, params) {
+			const resolved = resolveProgram(params.program);
+			if (!resolved.ok) return text(resolved.text, { ok: false });
+			const program = resolved.program;
+			const target = String(params.target);
+			const session = await sessionFor(program);
+			// S10: the gate decides before any child exists; the same check is repeated inside runSwarm.
+			const precheck = await session.checkTarget(target);
+			if (!precheck.ok) return text(`El enjambre no arranca: ${precheck.reason ?? "target fuera de alcance"}. No se lanzó ningún subagente.`, { ok: false, aborted: true });
+			const requested = Array.isArray(params.roles) ? params.roles.map((role) => String(role).trim()).filter((role) => role.length > 0) : [];
+			const unknown = requested.filter((role) => !(role in SWARM_ROLES));
+			if (unknown.length > 0) return text(`Rol desconocido: ${unknown.join(", ")}. Disponibles: ${Object.keys(SWARM_ROLES).join(", ")}.`, { ok: false });
+			const scopePath = session.paths.scopeFile() ?? join(root, "work", program, "scope.yaml");
+			const timeoutMs = config?.budget?.maxWallMs ?? 15 * 60 * 1000;
+			const runner = createPiRunner({
+				piCommand: process.env.GENTLE_BOUNTY_PI ? [process.env.GENTLE_BOUNTY_PI] : ["pi"],
+				extensionEntry: fileURLToPath(import.meta.url),
+				defaultTimeoutMs: timeoutMs,
+			});
+			const run = await runSwarm(
+				{
+					target,
+					...(requested.length === 0 ? {} : { roles: requested.map((role) => ({ role, task: SWARM_ROLES[role]?.brief ?? "", tools: [...(SWARM_ROLES[role]?.tools ?? [])] })) }),
+					...(params.max_parallel === undefined ? {} : { maxParallel: Number(params.max_parallel) }),
+					...(params.budget_tool_calls === undefined ? {} : { budgetToolCalls: Number(params.budget_tool_calls) }),
+					...(params.per_agent_budget === undefined ? {} : { perAgentBudget: Number(params.per_agent_budget) }),
+				},
+				{
+					checkTarget: (value) => session.checkTarget(value),
+					snapshot: (value) => session.blackboard.query({ target: value }),
+					run: async (spec, context) => {
+						const result = await runner.run({
+							agent: { name: `bounty-${spec.role}`, tools: spec.tools },
+							task: swarmTaskFor(spec, { program, scopePath, target: context.target, snapshot: context.snapshot }),
+							cwd: root,
+							env: { GENTLE_BOUNTY_ROOT: root, GENTLE_BOUNTY_PROGRAM: program },
+							timeoutMs,
+						});
+						return {
+							ok: result.ok,
+							output: result.output,
+							toolCalls: result.toolCalls.length,
+							durationMs: result.durationMs,
+							sessionId: result.sessionId,
+							invocationToken: result.invocationToken,
+							...(result.error === undefined ? {} : { error: result.error }),
+						};
+					},
+				},
+			);
+			if (run.aborted) return text(summarizeSwarm(run), { ok: false, aborted: true });
+
+			// S12: fan-in from what the children published, plus the candidates a human must verify.
+			const artifacts = await session.blackboard.query({ target });
+			const candidates: string[] = [];
+			try {
+				for (const file of await readdir(session.paths.findingsDir)) {
+					if (!file.endsWith(".json")) continue;
+					const finding = JSON.parse(await readFile(join(session.paths.findingsDir, file), "utf8")) as { id?: string; state?: string };
+					if (finding.state === "candidate" && typeof finding.id === "string") candidates.push(finding.id);
+				}
+			} catch {
+				// No findings yet is a valid fan-in.
+			}
+			await session.phase({ phase: "hypothesis", nextStep: `Enjambre sobre ${target}: ${candidates.length} candidato(s) para verificar con bounty_verify.` });
+			return text(
+				`${summarizeSwarm(run)}\n\nArtefactos de ${target} en la pizarra: ${artifacts.length}\nCandidatos para bounty_verify: ${candidates.length === 0 ? "ninguno" : candidates.join(", ")}`,
+				{ ok: run.results.every((result) => result.status === "skipped" || result.ok), toolCalls: run.toolCalls, artifacts: artifacts.length, candidates },
+			);
 		},
 	});
 
@@ -453,7 +661,8 @@ export default function bountyExtension(pi: PiLike): void {
 				agent: { name: "bounty-verify", tools },
 				task,
 				cwd: root,
-				env: { GENTLE_BOUNTY_ROOT: root, GENTLE_BOUNTY_PROGRAM: program },
+				// S8: the verifier's reproductions are real traffic, never a cached answer.
+				env: { GENTLE_BOUNTY_ROOT: root, GENTLE_BOUNTY_PROGRAM: program, GENTLE_BOUNTY_BYPASS_CACHE: "1" },
 				timeoutMs,
 			});
 			const verdict = parseVerdict(result.output);
@@ -482,19 +691,78 @@ export default function bountyExtension(pi: PiLike): void {
 		name: "bounty_recon",
 		label: "Bounty phase 0",
 		description:
-			"Phase 0: run subfinder, then httpx, and keep only the live hosts (2xx/3xx/401/403) as the target list. Both tools go through the gate and the rate; the clean subset lands in work/<program>/alive-hosts.json and as recon-intelligence.",
+			"Phase 0: run subfinder, then httpx, and keep only the live hosts (2xx/3xx/401/403) as the target list. Both tools go through the gate and the rate; the clean subset lands in work/<program>/alive-hosts.json and as recon-intelligence. With background: true it runs as a separate job and returns at once, so a long enumeration does not block the session.",
 		parameters: {
 			type: "object",
 			additionalProperties: false,
-			properties: { program: { type: "string" }, domain: { type: "string", description: "The in-scope domain to enumerate." } },
+			properties: {
+				program: { type: "string" },
+				domain: { type: "string", description: "The in-scope domain to enumerate." },
+				background: { type: "boolean", description: "Run as a separate job (work/<program>/jobs/) and return the job id. Consult it with bounty_job." },
+			},
 			required: ["program", "domain"],
 		} as never,
 		async execute(_toolCallId, params) {
 			const resolved = resolveProgram(params.program);
 			if (!resolved.ok) return text(resolved.text, { ok: false });
-			const session = await sessionFor(resolved.program);
-			const result = await session.reconPipeline({ domain: String(params.domain) });
+			const program = resolved.program;
+			const session = await sessionFor(program);
+			const domain = String(params.domain);
+
+			if (params.background === true) {
+				const jobs = createJobStore({ workspace: session.paths.workspace });
+				const job = await jobs.create({ kind: "recon", program, subject: domain });
+				const script = fileURLToPath(new URL("../scripts/recon-job.ts", import.meta.url));
+				const scopePath = session.paths.scopeFile() ?? join(root, "work", program, "scope.yaml");
+				const child = spawn(process.execPath, ["--experimental-strip-types", script, program, domain, job.id, scopePath], {
+					cwd: root,
+					detached: true,
+					stdio: "ignore",
+					env: { ...process.env, GENTLE_BOUNTY_ROOT: root, GENTLE_BOUNTY_PROGRAM: program },
+				});
+				child.unref();
+				return text(
+					`Recon en segundo plano: job ${job.id} (${domain}).\nSigue con otra cosa y consultá el resultado con bounty_job { program: "${program}", action: "status", id: "${job.id}" }. El job carga el alcance ya confirmado, respeta el ritmo y escribe en la misma cadena.`,
+					{ ok: true, job: job.id },
+				);
+			}
+
+			const result = await session.reconPipeline({ domain });
 			return text(result.text, { ok: result.ok });
+		},
+	});
+
+	pi.registerTool({
+		name: "bounty_job",
+		label: "Bounty jobs",
+		description:
+			"List the program's background jobs (action=list) or read one (action=status, id). A job left running by a killed process is reported as failed, never as alive.",
+		parameters: {
+			type: "object",
+			additionalProperties: false,
+			properties: {
+				program: { type: "string" },
+				action: { type: "string", enum: ["list", "status"] },
+				id: { type: "string", description: "For status: the job id, J-<stamp>-<hex>." },
+			},
+			required: ["program", "action"],
+		} as never,
+		async execute(_toolCallId, params) {
+			const resolved = resolveProgram(params.program);
+			if (!resolved.ok) return text(resolved.text, { ok: false });
+			const session = await sessionFor(resolved.program);
+			const jobs = createJobStore({ workspace: session.paths.workspace });
+
+			if (params.action === "list") {
+				const list = await listJobs(jobs, Date.now());
+				if (list.length === 0) return text("No hay jobs en este programa.", { ok: true, count: 0 });
+				return text(list.map(renderJob).join("\n"), { ok: true, count: list.length });
+			}
+
+			if (params.id === undefined) return text("Falta el id del job.", { ok: false });
+			const job = await jobs.read(String(params.id));
+			if (job === null) return text(`No existe el job ${String(params.id)}.`, { ok: false });
+			return text(renderJob(job), { ok: job.state !== "failed" });
 		},
 	});
 

@@ -13,6 +13,26 @@ una sesión de Pi real.
 
 Todo lo demás prioriza autonomía y fricción mínima.
 
+## Instalación en otra máquina
+
+Requisitos: **Node** `^22.19.0 || >=23.6.0`, **Pi** (`pi` en el PATH) y **Docker** con el plugin
+`docker compose` (para la memoria propia de la herramienta).
+
+```bash
+git clone <repo> gentle-bounty && cd gentle-bounty
+npm test                            # 491 tests, sin red y sin modelo
+bash engram/bin/install.sh          # memoria propia: contenedor + base en engram/data/
+mkdir -p .bounty && cp config.example.json .bounty/config.json   # opcional: rutas de tools, presupuesto
+bin/gentle-bounty --preflight <programa>             # alcance interpretado, sin abrir sesión
+bin/gentle-bounty <programa>        # sesión restringida de Pi
+```
+
+`bin/gentle-bounty` levanta el Engram del bounty si hace falta y exporta `ENGRAM_URL` (7438). El Engram
+del sistema, si tenés uno, no se toca ni se comparte. `GENTLE_BOUNTY_ENGRAM=off` desactiva la memoria.
+
+Datos que **no** viajan en el repo: `work/`, `scope/`, `.bounty/`, `engram/data/` y cualquier `.tgz`.
+El repo es la herramienta; lo aprendido y lo investigado quedan en cada máquina.
+
 ## Cómo se usa
 
 Arrancá la sesión con el lanzador, no con `pi` a mano: es el que aplica la allowlist de la sesión
@@ -39,6 +59,8 @@ bounty_scope { program: "acme", file: "work/acme/scope.yaml" }
 bounty_run   { program: "acme", tool: "httpx", args: ["-u","https://a.acme.com"], target: "https://a.acme.com" }
 bounty_phase { program: "acme", phase: "recon" }
 bounty_status{ program: "acme" }
+bounty_blackboard { program: "acme", action: "publish", category: "endpoint", target: "https://a.acme.com/api" }
+bounty_swarm  { program: "acme", target: "https://a.acme.com" }
 ```
 
 Cada transición reescribe `work/<program>/status.md`: qué fase corre, qué se encontró, qué espera

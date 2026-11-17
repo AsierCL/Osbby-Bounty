@@ -22,7 +22,10 @@ import type { Limiter, Reservation } from "../core/ratelimit.ts";
 import { createSharedRateLimiter } from "../core/shared-ratelimit.ts";
 import { createPendingQueue, type PendingQueue } from "../core/pending.ts";
 import { injectMassAssignment, normalizeBurst } from "../core/mutation-helpers.ts";
-import { seedSessionHeaders } from "../core/session-seed.ts";
+import { seedSessionHeaders, canSeedHeaders } from "../core/session-seed.ts";
+import { createRoleStore, normalizeRoleName } from "../core/roles.ts";
+import { createSharedBlackboard, type SharedBlackboard } from "../core/blackboard.ts";
+import { createRequestCache, isIdempotentRead, methodFromArgs, requestSignature, statusOf } from "../core/request-cache.ts";
 import { tokenStatus } from "../core/session-token.ts";
 import { filterAlive, parseReconOutput, summarizeRecon } from "../core/recon-tools.ts";
 import { classifyTarget, isHighValue, reserveFor } from "../core/priority.ts";
@@ -53,6 +56,8 @@ export interface ProgramConfig {
 	reportRedact?: boolean;
 	/** S75/task 3f: written report language. Operator-level, default "en". */
 	reportLang?: "en" | "es";
+	/** S7: opt-in short-lived cache of idempotent reads for this session. */
+	cache?: boolean;
 	now?: () => number;
 }
 
@@ -93,6 +98,8 @@ export interface ProgramSession {
 		scopeFile: () => string | null;
 	};
 	sessionId: string;
+	/** S4: the program's blackboard, one per workspace. */
+	blackboard: SharedBlackboard;
 	stopController: StopController;
 	/** D1: the only path that can move a finding to verified/rejected. Called by code, never by the model. */
 	applyVerifierVerdict(input: {
@@ -104,6 +111,8 @@ export interface ProgramSession {
 		/** Task 7: the runner's token for this invocation; without it the verdict is refused. */
 		invocationToken?: string;
 	}): Promise<ToolResult>;
+	/** S10: the swarm asks before spawning anything; no scope decision, no children. */
+	checkTarget(target: string): Promise<{ ok: boolean; reason?: string }>;
 	/** Emergency stop: kills the children of bounty_run and records it. */
 	stop(reason: string): Promise<ToolResult>;
 	scope(input: { file: string; confirm?: boolean }): Promise<ToolResult>;
@@ -114,6 +123,10 @@ export interface ProgramSession {
 		technique?: string;
 		method?: string;
 		followRedirects?: boolean;
+		/** S8: force real traffic; the verifier always uses it. */
+		bypassCache?: boolean;
+		/** S106: which role session to inject (work/<program>/sessions/<role>.headers). */
+		role?: string;
 		/** Per-call confirmation, so the adapter can hand over the live UI callback. */
 		confirm?: (question: string) => Promise<boolean>;
 	}): Promise<ToolResult>;
@@ -197,6 +210,10 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 	const evidence: EvidenceStore = createEvidenceStore(evidenceDir, { now });
 	const redaction: RedactionMode = config.redaction ?? "off";
 	const sessionId = config.sessionId ?? randomUUID();
+	const blackboard = createSharedBlackboard({ dir: workspace, program: config.program, clock: now });
+	// S7: the cache is opt-in. Repeating a request is part of some flows (two reproductions, loop
+	// detection); a session that wants the cache asks for it, the launcher does.
+	const requestCache = config.cache === true ? createRequestCache({ dir: workspace, program: config.program, clock: now }) : null;
 	const invocationToken = config.invocationToken ?? null;
 	const reportRedact = config.reportRedact ?? true;
 	const reportLang: "en" | "es" = config.reportLang ?? "en";
@@ -309,6 +326,7 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 	}
 
 	return {
+		blackboard,
 		paths: { workspace, statusFile: status.file(), evidenceDir, findingsDir, scopeFile: () => scopePath },
 		sessionId,
 		stopController,
@@ -503,6 +521,12 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			return { ok: true, text: `${summary}\n\nAlcance confirmado por un humano (hash ${hash.slice(0, 12)}…). Arranco.` };
 		},
 
+		async checkTarget(target) {
+			if (policy === null) return { ok: false, reason: "no hay alcance cargado y confirmado en esta sesión" };
+			const decision = await gate(policy, { target, argv: [], http: true }, { dns: deps.dns, readFile: deps.readFile });
+			return decision.allowed ? { ok: true } : { ok: false, reason: `${decision.reason}${decision.detail === undefined ? "" : ` (${decision.detail})`}` };
+		},
+
 		async run(input) {
 			await mkdir(workspace, { recursive: true });
 			if (stopController.isStopped()) {
@@ -542,12 +566,39 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				return blocked ?? { ok: false, text: (error as Error).message };
 			}
 			// S104: a program behind a hard WAF needs the human's session before anything runs.
+			// S106: a named role is the session for that matrix row, and it satisfies the requirement too.
+			const roles = createRoleStore({ workspace });
+			let roleName: string | undefined;
+			let roleSource: string | undefined;
+			if (input.role !== undefined) {
+				try {
+					roleName = normalizeRoleName(String(input.role));
+				} catch (error) {
+					return { ok: false, text: (error as Error).message };
+				}
+				if (!canSeedHeaders(input.tool)) {
+					return {
+						ok: false,
+						text: `El rol "${roleName}" se inyecta con curl, y esta tool es ${input.tool}: la credencial nunca va en argv, así que no hay forma segura de mandarla. Usá curl para un pedido autenticado.`,
+					};
+				}
+				const roleSession = await roles.read(roleName);
+				if (roleSession === null) {
+					const known = (await roles.list()).map((info) => info.role);
+					return {
+						ok: false,
+						text: `No existe work/${config.program}/sessions/${roleName}.headers. El operador deja ahí los headers del rol (0600, gitignored); no se inventa una sesión.${known.length === 0 ? " No hay ningún rol cargado." : ` Roles cargados: ${known.join(", ")}.`}`,
+					};
+				}
+				roleSource = roles.file(roleName);
+			}
+
 			if (current.requiresSession) {
-				const seeded = await deps.readFile(join(workspace, "session.headers")).catch(() => null);
+				const seeded = roleSource === undefined ? await deps.readFile(join(workspace, "session.headers")).catch(() => null) : roleSource;
 				if (seeded === null || seeded.trim().length === 0) {
 					return {
 						ok: false,
-						text: `El programa exige sesión inyectada (requires_session) y no hay work/${config.program}/session.headers. El operador inicia sesión en su navegador y deja ahí las cookies/storageState; no se intenta login automatizado.`,
+						text: `El programa exige sesión inyectada (requires_session) y no hay work/${config.program}/session.headers ni un rol que la aporte. El operador inicia sesión en su navegador y deja ahí las cookies/storageState; no se intenta login automatizado.`,
 					};
 				}
 			}
@@ -559,7 +610,7 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			// headers still have to come from -H in argv, so seeding cannot hide a missing User-Agent.
 			// S90: mass assignment is explicit and recorded: the tool shows which keys it added.
 			const injected = input.massAssignment === true ? injectMassAssignment(rawArgs) : { args: rawArgs, added: [] as string[], body: null };
-			const seed = await seedSessionHeaders({ workspace, tool: input.tool, args: injected.args });
+			const seed = await seedSessionHeaders({ workspace, tool: input.tool, args: injected.args, ...(roleSource === undefined ? {} : { source: roleSource }) });
 			const args = seed === null ? injected.args : seed.args;
 			const argv = [input.tool, ...args];
 			const request: GateRequest = {
@@ -744,6 +795,39 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				await refresh("Ejecuto la acción destructiva que confirmaste.");
 			}
 
+			// S7/S8: a cacheable read that is already answered costs no rate token, no budget and no
+			// subprocess. This is placed before the limiter on purpose: a coalesced waiter must not reserve.
+			const cacheMethod = input.method ?? methodFromArgs(args);
+			const cacheHeaders = headersFromArgs(args);
+			const cacheAuth = [cacheHeaders.authorization ?? "", cacheHeaders.cookie ?? "", roleName ?? ""].join("|");
+			const bypassCache = input.bypassCache === true || deps.env?.GENTLE_BOUNTY_BYPASS_CACHE === "1";
+			const cacheable = requestCache !== null && input.burst === undefined && !bypassCache && isIdempotentRead(cacheMethod);
+			const cacheSignature = cacheable ? requestSignature(cacheMethod, input.target, cacheAuth) : "";
+			let cacheTracker: { finish(entry: { signature: string; method: string; url: string; status: number | null; stdout: string; stderr: string; at: string }): Promise<void>; fail(error: Error): void } | null = null;
+			if (cacheable && requestCache !== null) {
+				const cached = await requestCache.lookup(cacheSignature);
+				const note = async (entry: { status: number | null; stdout: string }, source: string) => {
+					await evidence.append({ kind: "recon-note", payload: { cacheHit: true, source, method: cacheMethod, target: input.target, status: entry.status, sessionId } });
+					return {
+						ok: entry.status === null || entry.status < 400 || entry.status === 401 || entry.status === 403,
+						text: [
+							`[cacheHit: true] ${cacheMethod} ${input.target} — no se tocó la red, no se gastó ritmo ni presupuesto (${source}).`,
+							`Estado: ${entry.status ?? "sin estado HTTP"}.`,
+							entry.stdout.slice(0, 4000) || "(sin cuerpo guardado)",
+							"Si necesitás tráfico real (reproducir, condición de carrera), repetí con bypassCache.",
+						].join("\n"),
+					};
+				};
+				if (cached !== null) return await note(cached, "caché del programa");
+				const pending = requestCache.inFlight(cacheSignature);
+				if (pending !== undefined) {
+					const shared = await pending.catch(() => null);
+					if (shared !== null) return await note(shared, "coalescencia in-flight");
+				} else {
+					cacheTracker = requestCache.track(cacheSignature);
+				}
+			}
+
 			// S37: the wall clock is checked before anything else costs time or money.
 			const wallHit = budget.exceeded();
 			if (wallHit !== null) {
@@ -892,6 +976,8 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 					at: executionAt,
 					// S97: names only. The values live in the private config file.
 					...(seed === null ? {} : { seededHeaders: seed.headers, seededConfig: seed.configPath }),
+					// S106: which matrix row this request belongs to. A role name is not a secret.
+					...(roleName === undefined ? {} : { role: roleName }),
 					// S90: mass assignment is evidence, not a silent mutation.
 					...(injected.added.length === 0 ? {} : { massAssignmentKeys: injected.added }),
 					sessionId,
@@ -904,8 +990,18 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			try {
 				execution = await deps.runTool(argv);
 			} catch (error) {
+				cacheTracker?.fail(error as Error);
 				await evidence.append({ kind: "execution-error", payload: { tool: input.tool, error: (error as Error).message } });
 				return { ok: false, text: `No pude ejecutar ${input.tool}: ${(error as Error).message}` };
+			}
+			// S7: only a meaningful, cacheable response is stored; waiters get it without new traffic.
+			if (cacheTracker !== null && requestCache !== null) {
+				const storedStatus = statusOf(execution.stdout);
+				if (requestCache.isCacheable(cacheMethod, storedStatus)) {
+					await cacheTracker.finish({ signature: cacheSignature, method: cacheMethod, url: input.target, status: storedStatus, stdout: execution.stdout.slice(0, 4000), stderr: execution.stderr, at: new Date(now()).toISOString() });
+				} else {
+					cacheTracker.fail(new Error("response not cacheable"));
+				}
 			}
 
 			await evidence.append({

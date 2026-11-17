@@ -1,6 +1,8 @@
 # Secrets and per-program data: never committed.
 scope/
 work/
+.bounty/
+*.tgz
 
 # Node
 node_modules/

@@ -59,6 +59,32 @@ detalle no es un informe.
 - Si el gate bloquea, la razón queda escrita en `status.md` y se corrige el alcance o el comando.
 - Un token que no es un host no bloquea nada: no hay perfiles por herramienta.
 
+## Pizarra compartida: no repitas trabajo
+
+`bounty_blackboard` es el estado de descubrimientos del programa, compartido entre todos los agentes de la
+sesión, incluidos los subagentes. No es pub/sub: se lee cuando consultás.
+
+- **Antes de empezar un ítem, `claim`.** Si otro agente lo tiene, elegí otro: `claim` te dice quién.
+- **Publicá lo que descubrís** con `publish` (host, endpoint, parámetro, hipótesis). Es idempotente por
+  `kind + target + data`: si ya estaba, te lo dice y no lo repite.
+- **`since` con tu cursor** al empezar cada turno: eso es lo que el resto encontró mientras trabajabas.
+- La pizarra lleva la forma, no el contenido. Los bytes crudos van a `bounty_evidence`.
+- El autor de cada ítem es la sesión, no lo que escribas: no hay forma de publicar como otro.
+
+## Enjambre: roles complementarios, no copias
+
+`bounty_swarm` lanza subagentes con perspectivas distintas sobre el mismo programa. Cada rol tiene su
+allowlist, su sesión y su mandato; publica en la pizarra y muere. El padre agrega.
+
+- Roles: `js-analyzer`, `authz`, `schema`, `headers-config`.
+- **No repitas roles.** Dos veces el mismo rol es redundancia y gasta presupuesto sin cubrir nada nuevo.
+- **El ritmo es del programa.** Más agentes en paralelo no van más rápido: hacen cola en el mismo
+  rate. Paralelizás el análisis, no el tráfico.
+- **El presupuesto es agregado.** Cuando el enjambre gasta el tope, los roles que faltan no se lanzan
+  y queda escrito cuáles fueron.
+- Todos publican en la pizarra; el padre agrega. El gate decide antes de lanzar ningún hijo.
+- **Ningún hijo verifica hallazgos.** La verificación sigue siendo del verificador independiente.
+
 ## Verificación
 
 - Un hallazgo pasa a `verified` solo cuando lo reproduce un verificador que **no** es quien lo
@@ -140,6 +166,40 @@ La línea es clara y no se mueve:
 - Un endpoint interno descubierto se prueba **a través del host en scope** (o de la ruta documentada), no
   pegándole al host interno.
 
+## Superficie: del bundle a endpoints (S107)
+
+`bounty_surface` lee un artefacto que **ya está en disco** y publica su superficie en la pizarra. No
+descarga nada: primero lo capturás.
+
+1. Capturá con `bounty_run` a un archivo dentro del workspace:
+   `bounty_run { tool: "curl", args: ["-sS", "-o", "work/<programa>/files/main.js", "https://.../main.js"], target: "..." }`
+2. Extraé: `bounty_surface { program: "acme", file: "files/main.js" }`. Acepta bundles JS, OpenAPI/Swagger
+   y una introspección GraphQL.
+3. Cada endpoint va a la pizarra con path, verbo (si el esquema lo dice) y **nombres** de parámetros.
+4. Un secreto se publica por **ubicación y patrón**, nunca por valor: el valor sigue en el archivo. Si es
+   de un tercero, registralo con `bounty_finding` y `sensitive: true`; no lo uses para autenticarte.
+
+Los endpoints extraídos son **hipótesis de superficie**, no hallazgos: se prueban después, con `bounty_run`
+y el rol que corresponda.
+
+## Matriz de autorización: un rol por archivo (S106)
+
+El programa puede tener varias cuentas de prueba. Cada una es un archivo plano que escribe el operador:
+`work/<programa>/sessions/<rol>.headers` (`Name: value` por línea, 0600, gitignored).
+
+- **Vos nombrás el rol, no lo inventás**: `bounty_run { tool: "curl", args: [...], role: "user-b" }`.
+  Si el archivo no existe, el pedido se rechaza; no se cae a anónimo en silencio.
+- **Solo curl**: la credencial viaja en un config privado (`-K`), nunca en argv. Con otra tool, el rol se
+  rechaza en vez de mandar un pedido sin sesión.
+- **No leas los valores.** `bounty_session list` te dice qué roles hay y qué headers tienen; el valor
+  queda en su archivo. No copies una cookie a la pizarra, a un hallazgo ni a la evidencia.
+- **La matriz es un bucle, no una tool nueva**: el mismo pedido con `role: "anonymous"`, después con
+  cada rol, comparando status, largo y forma del JSON. Publicá la diferencia en la pizarra con
+  `kind: "hypothesis"` y `data: { role, baseline }`.
+- Un verbo que cambia estado (PUT/PATCH/DELETE) sigue siendo clase destructiva: pausa y decide el
+  humano, aunque estés dentro del rol correcto.
+- Las cuentas son de prueba y descartables. Nunca uses una cuenta real, ni del programa ni tuya.
+
 ## Metodología: más allá del control de acceso (S96)
 
 El alcance no se limita a IDOR. Con `bounty_run`, ritmo del programa y evidencia por paso, podés buscar:
@@ -213,6 +273,16 @@ Antes de auditar nada, el objetivo se filtra:
 3. El subconjunto limpio queda en `work/<programa>/alive-hosts.json` y como `recon-intelligence`.
 
 Trabajás **sobre esa lista**, no sobre lo que te acordás del scope.
+
+## Recon largo: en segundo plano (S108)
+
+`bounty_recon` con `background: true` lanza la fase 0 como job en un proceso aparte: carga el alcance
+ya confirmado, respeta el ritmo y escribe en la misma cadena. La sesión no queda bloqueada.
+
+- Consultá con `bounty_job { program, action: "status", id: "J-..." }`; la lista, con `action: "list"`.
+- Un job que quedó `running` porque el proceso murió se reporta `failed`, nunca como vivo.
+- Los hosts vivos que encuentra se publican en la pizarra: el enjambre arranca de ahí.
+- Un job es agenda, no autorización: no saltea gate, ni ritmo, ni confirmaciones.
 
 ## Autenticación: el login lo hace el humano (S104)
 

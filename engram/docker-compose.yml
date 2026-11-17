@@ -1,0 +1,24 @@
+# Engram PROPIO del bounty. No comparte nada con el Engram del sistema (7437): puerto, contenedor
+# y base son distintos, y la base vive acá adentro, en ./data.
+#
+# Consecuencia buscada: mover el directorio `gentle-bounty` se lleva la herramienta y su memoria.
+# Lo único que no viaja por git es `data/` (gitignored): las memorias son privadas, el stack no.
+#
+# Requiere ENGRAM_WORKDIR absoluto (lo exporta bin/engram-bounty). Se monta read-only para que el
+# servidor detecte el proyecto por su cwd: /project/current devuelve `gentle-bounty`, no `data`.
+services:
+  engram:
+    image: ${ENGRAM_IMAGE:-ghcr.io/gentleman-programming/engram:3.7.1}
+    container_name: ${ENGRAM_CONTAINER:-engram-bounty}
+    network_mode: host
+    command: ["serve"]
+    environment:
+      ENGRAM_DATA_DIR: /data
+      ENGRAM_PORT: "${ENGRAM_PORT:-7438}"
+    working_dir: ${ENGRAM_WORKDIR:?ENGRAM_WORKDIR is required; use engram/bin/engram-bounty}
+    volumes:
+      - ./data:/data
+      - ${ENGRAM_WORKDIR:?ENGRAM_WORKDIR is required}:${ENGRAM_WORKDIR:?ENGRAM_WORKDIR is required}:ro
+    user: "${ENGRAM_UID:-1000}:${ENGRAM_GID:-1000}"
+    restart: "no"
+    init: true
