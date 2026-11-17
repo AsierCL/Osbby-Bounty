@@ -23,6 +23,8 @@ import { createSharedRateLimiter } from "../core/shared-ratelimit.ts";
 import { createPendingQueue, type PendingQueue } from "../core/pending.ts";
 import { injectMassAssignment, normalizeBurst } from "../core/mutation-helpers.ts";
 import { seedSessionHeaders } from "../core/session-seed.ts";
+import { tokenStatus } from "../core/session-token.ts";
+import { parseReconOutput, summarizeRecon } from "../core/recon-tools.ts";
 import { requestViewForModel, responseViewForModel, type RedactionMode } from "../core/redact.ts";
 import { describeRequiredHeaders, parseScope, evaluate, summarizeScope, type ScopePolicy } from "../core/scope.ts";
 import { scoreVector } from "../core/cvss.ts";
@@ -411,6 +413,16 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			await status.setScopeHash(hash);
 			const previous = await status.read();
 			const alreadyConfirmed = previous.scopeConfirmedHash === hash;
+			// S103: before the agent plans hours of work, say how much life the session has left.
+			{
+				const headersText = await deps.readFile(join(workspace, "session.headers")).catch(() => null);
+				const token = tokenStatus(headersText, now);
+				if (token.state === "expiring" || token.state === "expired") {
+					await status.note(
+						`sesión: ${token.detail}. Pedile al operador un storageState o cookies nuevas antes de lanzar ráfagas; no reintento con un token vencido.`,
+					);
+				}
+			}
 			// S101/S102: reloading the scope is the operator's resume path. If they ran --restart-limits,
 			// the in-memory clock picks up the reset instead of needing a process restart.
 			if (previous.budget?.limitHit !== null && previous.budget?.limitHit !== undefined) {
@@ -737,6 +749,15 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			// S90: a controlled burst of identical requests, for race-condition testing. Each request
 			// reserves its own slot in the program's rate, and every one is in the chain.
 			if (burst > 1) {
+				// S103: a burst against a dead session is wasted budget.
+				const headersTextBurst = await deps.readFile(join(workspace, "session.headers")).catch(() => null);
+				const tokenBurst = tokenStatus(headersTextBurst, now);
+				if (tokenBurst.state === "expired") {
+					return {
+						ok: false,
+						text: `Ráfaga cancelada: ${tokenBurst.detail}. Pedile al operador que renueve work/${config.program}/session.headers (storageState o cookies) y volvé a intentar.`,
+					};
+				}
 				const perHostCapBurst = current.limits.maxRequestsPerHost ?? MAX_PER_HOST_DEFAULT;
 				const usedBurst = hostCounts.get(primaryHost) ?? 0;
 				if (usedBurst + burst > perHostCapBurst) {
@@ -862,6 +883,14 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 				payload: { tool: input.tool, exitCode: execution.exitCode, stdout: execution.stdout, stderr: execution.stderr },
 			});
 
+			// S103: the recon tools write JSON; keep the structure, not just the bytes.
+			let reconSummary: string | null = null;
+			if (typeof input.reconTool === "string" && input.reconTool.length > 0) {
+				const entries = parseReconOutput(input.reconTool, execution.stdout);
+				reconSummary = summarizeRecon(entries);
+				await evidence.append({ kind: "recon-intelligence", payload: { tool: input.reconTool, argv, endpoint, entries, summary: reconSummary } });
+			}
+
 			if (typeof execution.tokens === "number") budget.tokens(execution.tokens);
 
 			// S89 loop detector: a 403/429 or an anti-bot marker is a block signal; a normal response resets.
@@ -882,9 +911,22 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 						: /x-sucuri|sucuri/i.test(execution.stdout)
 							? "Sucuri"
 							: null;
+				if (httpStatus === "401" || httpStatus === "403") {
+					const headersTextAuth = await deps.readFile(join(workspace, "session.headers")).catch(() => null);
+					const authToken = tokenStatus(headersTextAuth, now);
+					if (authToken.state !== "missing") {
+						await status.note(
+							`sesión: ${httpStatus} con ${authToken.detail}. Si es caducidad (${authToken.state}), pedile al operador un storageState nuevo; no reintento el mismo token.`,
+						);
+					}
+				}
 				if (waf !== null) {
+					const seedPath = join(workspace, "session.headers");
+					const seedExists = await deps.readFile(seedPath).then(() => true, () => false);
 					await status.note(
-						`Infraestructura protegida (WAF: ${waf}) en ${endpoint}. Pivotá a la superficie que acepta la sesión inyectada (work/${config.program}/session.headers) o a la API que no dispara el reto.`,
+						seedExists
+							? `Infraestructura protegida (WAF: ${waf}) en ${endpoint}. Pivotá a la superficie que acepta la sesión inyectada (work/${config.program}/session.headers) o a la API que no dispara el reto.`
+							: `Infraestructura protegida (WAF: ${waf}) en ${endpoint}. No hay work/${config.program}/session.headers: pedile al operador una sesión o pivotá a la API que no dispara el reto.`,
 					);
 					await refresh("WAF: pivoteo a otra superficie en vez de insistir.");
 				}
@@ -908,6 +950,7 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 					`Contactado: ${contactLines || "nada"}.`,
 					viewed.body === null ? "(sin salida)" : viewed.body,
 					...(decision.notes.length > 0 ? [`Notas del gate: ${decision.notes.join("; ")}`] : []),
+					...(reconSummary === null ? [] : [`Recon (${input.reconTool}): ${reconSummary} — quedó como recon-intelligence en la cadena.`]),
 					`La salida cruda quedó en el evidence store de ${evidenceDir}.`,
 				].join("\n"),
 			};

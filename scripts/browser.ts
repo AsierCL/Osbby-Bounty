@@ -55,6 +55,19 @@ if (scopePath === undefined || scopePath.length === 0) {
 	process.exit(2);
 }
 const nav = makeNavPolicy(await readFile(scopePath, "utf8"));
+// S103: the program's required headers are an HTTP contract. The wrapper sends the ones you pass with
+// -H and refuses to guess the rest; it never spoofs a fingerprint to get past a WAF.
+for (const [name, required] of Object.entries(nav.policy.requiredHeaders)) {
+	const provided = headers[name.toLowerCase()];
+	if (provided === undefined) {
+		console.error(`el programa exige la cabecera ${name} (${required.mode === "contains" ? `contiene "${required.value}"` : "valor exacto"}): pasala con -H "${name}: ...". El wrapper no falsea huellas ni agentes para evitarlo.`);
+		process.exit(2);
+	}
+	if (required.mode === "contains" && !provided.toLowerCase().includes(required.value.toLowerCase())) {
+		console.error(`la cabecera ${name} enviada no contiene "${required.value}": corregila; el wrapper no cambia tu identidad para pasar el control.`);
+		process.exit(2);
+	}
+}
 
 function loadPlaywright(): { chromium: { launch(options?: Record<string, unknown>): Promise<unknown> } } {
 	const candidates = [

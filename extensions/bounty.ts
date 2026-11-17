@@ -262,6 +262,11 @@ export default function bountyExtension(pi: PiLike): void {
 				follow_redirects: { type: "boolean" },
 				burst: { type: "number", description: "Controlled burst of identical requests (1-12) for race-condition testing; each request reserves the program's rate." },
 				mass_assignment: { type: "boolean", description: "Merge documented escalation keys into a JSON body and record which keys were added." },
+				recon_tool: {
+					type: "string",
+					enum: ["subfinder", "httpx", "katana", "nuclei", "gobuster"],
+					description: "Parse this recon tool's JSON/NDJSON output into structured recon-intelligence evidence.",
+				},
 			},
 			required: ["program", "tool", "args", "target"],
 		} as never,
@@ -283,6 +288,7 @@ export default function bountyExtension(pi: PiLike): void {
 				...(params.technique === undefined ? {} : { technique: String(params.technique) }),
 				...(typeof params.burst === "number" ? { burst: params.burst } : {}),
 				...(params.mass_assignment === true ? { massAssignment: true } : {}),
+				...(params.recon_tool === undefined ? {} : { reconTool: String(params.recon_tool) }),
 				...(params.method === undefined ? {} : { method: String(params.method) }),
 				...(params.follow_redirects === undefined ? {} : { followRedirects: params.follow_redirects === true }),
 			});

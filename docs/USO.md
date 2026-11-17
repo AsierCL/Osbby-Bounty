@@ -270,3 +270,16 @@ Qué **no** hace: no cambia los límites. Si querés más horas o más llamadas,
 
 Para que una sesión **ya abierta** lo tome: recargá el alcance (`bounty_scope` sobre el mismo archivo,
 que dice "ya lo confirmaste"). El reloj se reinicia en memoria y sigue. Si preferís, reiniciá la sesión.
+
+## Ampliar presupuesto y seguir (S103)
+
+```bash
+bin/gentle-bounty --extend-budget underarmour --calls 800 --hours 12
+```
+
+Sube los límites en `.bounty/config.json` **y** reinicia los contadores con un evento `budget-reset` en la
+cadena. Es una acción de la CLI: el agente no puede ampliarse el presupuesto a sí mismo.
+
+Antes de lanzar una ráfaga, el arnés mira `work/<programa>/session.headers` y lee el `exp` del JWT: si al
+token le quedan menos de 10 minutos avisa en `status.md`, y si ya expiró **cancela la ráfaga** y te pide un
+storageState nuevo. Un 401/403 con sesión presente también queda anotado como posible caducidad.

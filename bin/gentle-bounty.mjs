@@ -244,6 +244,14 @@ async function main(argv) {
 		process.exit(child.status ?? 1);
 	}
 
+	// S103: raise the policy and restart the counters in one operator action.
+	const extendIndex = argv.indexOf("--extend-budget");
+	if (extendIndex >= 0) {
+		const root = process.env.GENTLE_BOUNTY_ROOT ?? process.cwd();
+		const child = spawnSync(process.execPath, ["--experimental-strip-types", join(packageRootOf(), "scripts", "extend-budget.ts"), root, ...argv.slice(extendIndex + 1)], { stdio: "inherit" });
+		process.exit(child.status ?? 1);
+	}
+
 	const pendingIndex = argv.indexOf("--pending");
 	if (pendingIndex >= 0) {
 		const target = argv[pendingIndex + 1];

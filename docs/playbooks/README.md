@@ -16,6 +16,7 @@ hace "para ver".
 | [Race conditions](race-conditions.md) | ráfagas controladas para cupones/stock/saldo |
 | [GraphQL](graphql.md) | introspección, campos sensibles y batching |
 | [BOLA y verbos](bola-verb-change.md) | acceso a recurso ajeno por cambio de verbo/ruta |
+| [Recon tools](recon-tools.md) | subfinder, httpx, katana con `recon_tool` |
 
 Antes de decir "no hay nada": buscá anomalías (tiempo, longitud, código, mensaje). Una diferencia
 reproducible es una hipótesis; dos, un hallazgo.
