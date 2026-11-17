@@ -25,7 +25,7 @@ export const MAIN_SESSION_TOOLS = [
 	"bounty_scope",
 	"bounty_run",
 	"bounty_evidence",
-	"bounty_board",
+	"bounty_blackboard",
 	"bounty_session",
 	"bounty_surface",
 	"bounty_job",

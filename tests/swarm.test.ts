@@ -154,7 +154,7 @@ test("the task names the program, the scope and the role mandate", () => {
 	assert.match(task, /programa acme/);
 	assert.match(task, /\/w\/acme\/scope\.yaml/);
 	assert.match(task, /authz-matrix/);
-	assert.match(task, /bounty_board claim/);
+	assert.match(task, /bounty_blackboard claim/);
 	assert.match(task, /Foco de esta corrida: el endpoint de facturas/);
 	assert.match(task, /\{"role":"authz-matrix"/);
 });

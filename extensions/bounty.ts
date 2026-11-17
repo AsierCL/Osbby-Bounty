@@ -23,10 +23,10 @@ import { buildDomainPrompt } from "../src/pi/prompt.ts";
 import { createPiRunner } from "../src/pi/runner.ts";
 import { verifierTaskFor, parseVerdict } from "../src/pi/verifier.ts";
 import { createEvidenceStore } from "../src/core/evidence.ts";
-import { createBoard } from "../src/core/board.ts";
+import { createSharedBlackboard } from "../src/core/blackboard.ts";
 import { createRoleStore, normalizeRoleName } from "../src/core/roles.ts";
 import { extractSurface, summarizeSurface, endpointBoardData, MAX_SURFACE_BYTES } from "../src/core/surface.ts";
-import { runBoardAction, type BoardAction } from "../src/pi/board-tools.ts";
+import { runBlackboardAction, type BlackboardAction } from "../src/pi/blackboard-tools.ts";
 import { runSwarm, SWARM_ROLES, summarizeSwarm, swarmTaskFor } from "../src/pi/swarm.ts";
 import { extractJsonArray } from "../src/core/json-extract.ts";
 import type { BountyPhase } from "../src/core/status.ts";
@@ -311,23 +311,21 @@ export default function bountyExtension(pi: PiLike): void {
 
 			const relative = candidate.slice(workspace.length + 1);
 			const report = extractSurface(bytes.toString("utf8"), relative);
-			const board = createBoard({ dir: join(session.paths.workspace, "board") });
+			const blackboard = createSharedBlackboard({ dir: session.paths.workspace, program: resolved.program });
 			let created = 0;
 			let known = 0;
 			const lines: string[] = [];
 			for (const endpoint of report.endpoints) {
-				const published = await board.publish({ kind: "endpoint", target: endpoint.path, data: endpointBoardData(endpoint), by: session.sessionId });
+				const published = await blackboard.publish({ category: "endpoint", target: endpoint.path, data: endpointBoardData(endpoint), discoveredBy: session.sessionId });
 				if (published.created) {
 					created += 1;
 					if (lines.length < 15) lines.push(`+ ${endpoint.method === null ? "ruta" : endpoint.method} ${endpoint.path}${endpoint.params.length === 0 ? "" : ` (${endpoint.params.join(", ")})`}`);
 				} else known += 1;
 			}
 			for (const secret of report.secrets) {
-				const published = await board.publish({ kind: "secret", target: secret.location, data: { pattern: secret.pattern }, by: session.sessionId });
-				if (published.created) {
-					created += 1;
-					lines.push(`! secreto en ${secret.location}: ${secret.pattern}`);
-				}
+				// A secret value never enters the blackboard: it is recorded by location and pattern only.
+				await session.evidence({ action: "append", kind: "recon-note", payload: { secret: secret.location, pattern: secret.pattern, from: "bounty_surface" } });
+				lines.push(`! secreto en ${secret.location}: ${secret.pattern}`);
 			}
 
 			const body = [summarizeSurface(report), `Archivo: ${relative}`, `Pizarra: ${created} nuevo(s), ${known} ya conocido(s)`, "", ...lines].join("\n");
@@ -395,40 +393,51 @@ export default function bountyExtension(pi: PiLike): void {
 	});
 
 	pi.registerTool({
-		name: "bounty_board",
-		label: "Bounty board",
+		name: "bounty_blackboard",
+		label: "Bounty blackboard",
 		description:
-			"Shared discovery board of the program. publish a discovery (idempotent by kind+target+data), claim an item before working on it, release it when done, since a cursor to see what the swarm found, or query by kind/target. The author is this session, never the text you pass.",
+			"Shared blackboard of the program. publish a structural discovery (idempotent by category+target+data, and it is logged as a recon-note in the evidence chain), query by category/target, claim an artifact before working on it, release it, or since a timestamp to see what the swarm found. The author is this session, never the text you pass.",
 		parameters: {
 			type: "object",
 			additionalProperties: false,
 			properties: {
 				program: { type: "string" },
-				action: { type: "string", enum: ["publish", "claim", "release", "since", "query"] },
-				kind: { type: "string", description: "host, endpoint, param, hypothesis, finding, note…" },
-				target: { type: "string", description: "The host or URL the discovery is about." },
+				action: { type: "string", enum: ["publish", "query", "claim", "release", "since"] },
+				category: { type: "string", enum: ["endpoint", "hidden_param", "auth_schema", "header_anomaly", "tech_fingerprint", "state_invariant"] },
+				target: { type: "string", description: "The normalized host or URL the artifact is about." },
 				data: { type: "object", description: "Small structured hint (≤4KB). Raw bytes belong in bounty_evidence." },
-				seq: { type: "number", description: "Board item number, for claim/release." },
+				id: { type: "string", description: "Artifact id, for claim/release." },
 				ttl_ms: { type: "number", description: "Lease length for claim. Default 10 minutes." },
-				cursor: { type: "number", description: "For since: return only items with a higher seq." },
+				ts: { type: "string", description: "For since: ISO timestamp; return artifacts newer than it." },
+				limit: { type: "number", description: "For query: maximum artifacts to return." },
 			},
 			required: ["program", "action"],
-		} as never,
+		},
 		async execute(_toolCallId, params) {
 			const resolved = resolveProgram(params.program);
 			if (!resolved.ok) return text(resolved.text, { ok: false });
 			const session = await sessionFor(resolved.program);
-			const board = createBoard({ dir: join(session.paths.workspace, "board") });
-			const result = await runBoardAction(board, session.sessionId, {
-				action: params.action as BoardAction,
-				...(params.kind === undefined ? {} : { kind: String(params.kind) }),
+			const result = await runBlackboardAction(session.blackboard, session.sessionId, {
+				action: params.action as BlackboardAction,
+				...(params.category === undefined ? {} : { category: params.category as never }),
 				...(params.target === undefined ? {} : { target: String(params.target) }),
 				...(params.data === undefined ? {} : { data: params.data as Record<string, unknown> }),
-				...(params.seq === undefined ? {} : { seq: Number(params.seq) }),
+				...(params.id === undefined ? {} : { id: String(params.id) }),
 				...(params.ttl_ms === undefined ? {} : { ttlMs: Number(params.ttl_ms) }),
-				...(params.cursor === undefined ? {} : { cursor: Number(params.cursor) }),
+				...(params.ts === undefined ? {} : { ts: String(params.ts) }),
+				...(params.limit === undefined ? {} : { limit: Number(params.limit) }),
 			});
-			return text(result.text, { ok: result.ok, ...result.details });
+			// S4: a new artifact is also a recon-note, so the discovery is in the chain of custody too.
+			let evidenceNote = "";
+			if (result.ok && result.details.created === true) {
+				const recorded = await session.evidence({
+					action: "append",
+					kind: "recon-note",
+					payload: { artifact: result.details.id, category: params.category, target: params.target, data: params.data ?? {}, from: "bounty_blackboard" },
+				});
+				evidenceNote = recorded.ok ? "\nAnotado en la cadena como recon-note." : `\nNo pude anotarlo en la cadena: ${recorded.text}`;
+			}
+			return text(`${result.text}${evidenceNote}`, { ok: result.ok, ...result.details });
 		},
 	});
 
@@ -465,7 +474,7 @@ export default function bountyExtension(pi: PiLike): void {
 
 			const session = await sessionFor(program);
 			const specs = requested.map((role) => ({ role, task: SWARM_ROLES[role]?.brief ?? "", tools: [...(SWARM_ROLES[role]?.tools ?? [])] }));
-			const board = createBoard({ dir: join(session.paths.workspace, "board") });
+			const blackboard = createSharedBlackboard({ dir: session.paths.workspace, program: resolved.program });
 			const cursor = (await board.state()).headSeq;
 			const scopePath = session.paths.scopeFile() ?? join(root, "work", program, "scope.yaml");
 			const focus = typeof params.focus === "string" ? params.focus : undefined;
@@ -503,7 +512,7 @@ export default function bountyExtension(pi: PiLike): void {
 				},
 			);
 
-			const fresh = await runBoardAction(board, session.sessionId, { action: "since", cursor });
+			const fresh = await runBlackboardAction(blackboard, session.sessionId, { action: "since", ts: head });
 			return text(`${summarizeSwarm(run)}\n\nPizarra:\n${fresh.text}`, {
 				ok: run.results.every((result) => result.status === "skipped" || result.ok),
 				toolCalls: run.toolCalls,

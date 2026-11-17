@@ -24,6 +24,7 @@ import { createPendingQueue, type PendingQueue } from "../core/pending.ts";
 import { injectMassAssignment, normalizeBurst } from "../core/mutation-helpers.ts";
 import { seedSessionHeaders, canSeedHeaders } from "../core/session-seed.ts";
 import { createRoleStore, normalizeRoleName } from "../core/roles.ts";
+import { createSharedBlackboard, type SharedBlackboard } from "../core/blackboard.ts";
 import { tokenStatus } from "../core/session-token.ts";
 import { filterAlive, parseReconOutput, summarizeRecon } from "../core/recon-tools.ts";
 import { classifyTarget, isHighValue, reserveFor } from "../core/priority.ts";
@@ -94,6 +95,8 @@ export interface ProgramSession {
 		scopeFile: () => string | null;
 	};
 	sessionId: string;
+	/** S4: the program's blackboard, one per workspace. */
+	blackboard: SharedBlackboard;
 	stopController: StopController;
 	/** D1: the only path that can move a finding to verified/rejected. Called by code, never by the model. */
 	applyVerifierVerdict(input: {
@@ -200,6 +203,7 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 	const evidence: EvidenceStore = createEvidenceStore(evidenceDir, { now });
 	const redaction: RedactionMode = config.redaction ?? "off";
 	const sessionId = config.sessionId ?? randomUUID();
+	const blackboard = createSharedBlackboard({ dir: workspace, program: config.program, clock: now });
 	const invocationToken = config.invocationToken ?? null;
 	const reportRedact = config.reportRedact ?? true;
 	const reportLang: "en" | "es" = config.reportLang ?? "en";
@@ -312,6 +316,7 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 	}
 
 	return {
+		blackboard,
 		paths: { workspace, statusFile: status.file(), evidenceDir, findingsDir, scopeFile: () => scopePath },
 		sessionId,
 		stopController,

@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { createSession } from "../src/pi/session.ts";
 import { createJobStore } from "../src/core/jobs.ts";
 import { runReconJob } from "../src/pi/recon-job.ts";
-import { createBoard } from "../src/core/board.ts";
+import { createSharedBlackboard } from "../src/core/blackboard.ts";
 import { loadGlobalConfig } from "../src/core/config.ts";
 import { resolveForGate } from "../src/pi/dns.ts";
 import { runProcess } from "../src/pi/process.ts";
@@ -68,13 +68,13 @@ const result = await runReconJob(
 // S108: the board is the swarm's input, so the job publishes what it found before exiting.
 try {
 	const alive = JSON.parse(await readFile(join(workspace, "alive-hosts.json"), "utf8")) as { url: string; status: number; title?: string }[];
-	const board = createBoard({ dir: join(workspace, "board") });
+	const blackboard = createSharedBlackboard({ dir: workspace, program });
 	for (const host of alive) {
-		await board.publish({
-			kind: "host",
+		await blackboard.publish({
+			category: "endpoint",
 			target: host.url,
 			data: { status: host.status, ...(host.title === undefined ? {} : { title: host.title }) },
-			by: `job:${result.job.id}`,
+			discoveredBy: `job:${result.job.id}`,
 		});
 	}
 	console.log(`pizarra: ${alive.length} host(s) publicados por ${result.job.id}`);

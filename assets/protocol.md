@@ -61,7 +61,7 @@ detalle no es un informe.
 
 ## Pizarra compartida: no repitas trabajo
 
-`bounty_board` es el estado de descubrimientos del programa, compartido entre todos los agentes de la
+`bounty_blackboard` es el estado de descubrimientos del programa, compartido entre todos los agentes de la
 sesión, incluidos los subagentes. No es pub/sub: se lee cuando consultás.
 
 - **Antes de empezar un ítem, `claim`.** Si otro agente lo tiene, elegí otro: `claim` te dice quién.

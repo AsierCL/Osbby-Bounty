@@ -183,10 +183,10 @@ se pierde.
 
 ## Pizarra compartida: cómo se coordinan varios agentes
 
-Cuando varios subagentes trabajan sobre el mismo programa, `bounty_board` es lo que evita que
+Cuando varios subagentes trabajan sobre el mismo programa, `bounty_blackboard` es lo que evita que
 trabajen a ciegas o repitan lo mismo.
 
-- `bounty_board { program, action: "since", cursor: 0 }` — qué se descubrió hasta ahora.
+- `bounty_blackboard { program, action: "since", cursor: 0 }` — qué se descubrió hasta ahora.
 - `publish` con `kind` (host, endpoint, param, hypothesis…), `target` y `data` chico. Es idempotente:
   el mismo descubrimiento dos veces es un solo ítem.
 - `claim` antes de trabajar un ítem; el lease vence solo (10 min por defecto) y se puede renovar.
@@ -194,7 +194,7 @@ trabajen a ciegas o repitan lo mismo.
 - El autor es la sesión, no el texto: nadie puede publicar como otro.
 - La pizarra guarda **forma**, no contenido: el payload crudo va a la cadena de evidencia.
 
-La pizarra vive en `work/<programa>/board/` (`board.jsonl` + `claims.json`). Se lee bajo lock, igual
+La pizarra vive en `work/<programa>/` (`blackboard.json` + `claims.json`). Se lee bajo lock, igual
 que la evidencia, así que varios procesos del mismo programa no se pisan.
 
 ## Enjambre: varios roles sobre el mismo programa

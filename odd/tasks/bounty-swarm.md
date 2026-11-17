@@ -112,7 +112,7 @@ ha pasado es susceptible de ser modificado o adaptado para nuestro proyecto.
 |---|---|---|
 | T1 | `22a6864` | `docs/PLAN.md` + este documento |
 | T2 | `fc16776` | `src/core/board.ts`, `tests/board.test.ts` (15 tests, incluye 4 procesos concurrentes) |
-| T3a | `fb7ab20` | `src/pi/board-tools.ts`, `tests/board-tools.test.ts` (10), tool `bounty_board` en la allowlist del orquestador y de los hijos |
+| T3a | `fb7ab20` | `src/pi/board-tools.ts`, `tests/board-tools.test.ts` (10), tool `bounty_blackboard` en la allowlist del orquestador y de los hijos |
 | T3b | `f9fd62e` | `src/pi/swarm.ts`, `tests/swarm.test.ts` (16), 4 agentes nuevos, tool `bounty_swarm` |
 
 Suite completa: 450 tests, 450 pass. Engram sigue caído (404 del contrato); el espejo queda pendiente
