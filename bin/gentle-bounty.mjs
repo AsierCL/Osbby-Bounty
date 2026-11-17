@@ -252,6 +252,19 @@ async function main(argv) {
 		process.exit(child.status ?? 1);
 	}
 
+	// S105: the same human confirmation, from the operator's own terminal.
+	const confirmIndex = argv.indexOf("--confirm-scope");
+	if (confirmIndex >= 0) {
+		const target = argv[confirmIndex + 1];
+		if (!target || target.startsWith("--")) {
+			console.error("usage: gentle-bounty --confirm-scope <programa>");
+			process.exit(2);
+		}
+		const root = process.env.GENTLE_BOUNTY_ROOT ?? process.cwd();
+		const child = spawnSync(process.execPath, ["--experimental-strip-types", join(packageRootOf(), "scripts", "confirm-scope.ts"), root, target], { stdio: "inherit" });
+		process.exit(child.status ?? 1);
+	}
+
 	const pendingIndex = argv.indexOf("--pending");
 	if (pendingIndex >= 0) {
 		const target = argv[pendingIndex + 1];
