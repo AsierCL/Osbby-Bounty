@@ -215,6 +215,37 @@ bounty_swarm { program: "acme", roles: ["authz-matrix", "js-analyst", "skeptic"]
 Roles disponibles: `recon-surface`, `authz-matrix`, `js-analyst`, `schema-auditor`, `skeptic`.
 Repetir un rol se rechaza: es redundancia, no cobertura.
 
+## Varias cuentas: la matriz de autorización
+
+Cuando el programa tiene cuentas de prueba (A, B, admin), cada una es **un archivo plano** que
+escribís vos:
+
+```bash
+node --experimental-strip-types scripts/set-role.ts acme user-a ./user-a.headers
+pbpaste | node --experimental-strip-types scripts/set-role.ts acme anonymous
+```
+
+El archivo queda en `work/acme/sessions/<rol>.headers` con permisos `0600`, dentro de `work/` (que ya
+está gitignoted). Formato: `Name: value` por línea, `#` para comentarios. El script te muestra los
+nombres de los headers y los avisos (por ejemplo, “no tiene Cookie ni Authorization”), nunca los
+valores.
+
+Dentro de la sesión:
+
+- `bounty_session { program: "acme", action: "list" }` — qué roles hay, con qué headers y cuándo se
+  actualizaron.
+- `bounty_session { program: "acme", action: "check", role: "user-a" }` — un rol en particular.
+- `bounty_run { ..., role: "user-a" }` — el mismo pedido con esa sesión. Si el archivo no existe se
+  rechaza; no se cae a anónimo en silencio. Solo funciona con `curl`.
+
+La credencial viaja en un config privado (`-K`), nunca en argv, así que la cadena de evidencia guarda
+el nombre del rol y el nombre de los headers, no el valor. La comparación entre roles es un bucle que
+hace el agente: mismo endpoint con `role: "anonymous"`, después con cada rol, y la diferencia va a la
+pizarra.
+
+> Decisión del operador (S106): archivo plano, host propio, cuentas de prueba descartables. Si algún
+día eso deja de ser cierto, esta es la pieza que hay que cambiar, no el resto.
+
 ## Dónde vive todo
 
 ```

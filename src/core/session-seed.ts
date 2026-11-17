@@ -9,8 +9,16 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { parseHeaderLines } from "./headers.ts";
+
 /** Tools that understand curl's `-K` config file. Others must pass -H themselves. */
 const SEEDABLE_TOOLS = new Set(["curl"]);
+
+/** S106: a role can only be injected where the single session already can: curl's private config. */
+export function canSeedHeaders(tool: string): boolean {
+	const binary = (tool.trim().split(/[\\/]/).pop() ?? "").toLowerCase();
+	return SEEDABLE_TOOLS.has(binary);
+}
 
 export interface SeedResult {
 	/** Arguments to execute: the original ones plus `-K <private config>`. */
@@ -25,11 +33,13 @@ export async function seedSessionHeaders(options: {
 	workspace: string;
 	tool: string;
 	args: string[];
+	/** S106: an absolute path (a role file) instead of the single session file. */
+	source?: string;
 }): Promise<SeedResult | null> {
 	const binary = (options.tool.trim().split(/[\\/]/).pop() ?? "").toLowerCase();
 	if (!SEEDABLE_TOOLS.has(binary)) return null;
 
-	const source = join(options.workspace, "session.headers");
+	const source = options.source ?? join(options.workspace, "session.headers");
 	let text: string;
 	try {
 		text = await readFile(source, "utf8");
@@ -37,14 +47,7 @@ export async function seedSessionHeaders(options: {
 		return null;
 	}
 
-	const headers: { name: string; value: string }[] = [];
-	for (const line of text.split(/\r?\n/)) {
-		const trimmed = line.trim();
-		if (trimmed.length === 0 || trimmed.startsWith("#")) continue;
-		const separator = trimmed.indexOf(":");
-		if (separator <= 0) continue;
-		headers.push({ name: trimmed.slice(0, separator).trim(), value: trimmed.slice(separator + 1).trim() });
-	}
+	const headers = parseHeaderLines(text);
 	if (headers.length === 0) return null;
 
 	const dir = join(options.workspace, ".session");

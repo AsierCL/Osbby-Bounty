@@ -118,9 +118,21 @@ ha pasado es susceptible de ser modificado o adaptado para nuestro proyecto.
 Suite completa: 450 tests, 450 pass. Engram sigue caído (404 del contrato); el espejo queda pendiente
 y el repo es la fuente.
 
-### L5 — pendiente con decisión abierta
+### L5 — decisión de almacenamiento (cerrada)
 
-- T5 (`bounty_session`) necesita una decisión de producto: dónde vive la credencial de cada rol
-  (archivo plano gitignored como hoy, keyring del sistema, o storage state del navegador).
-- T4 (`bounty_surface`) y T6 (recon como job) no tienen decisión abierta: son la próxima unidad
-  natural después de resolver T5, para no escribir la matriz de roles dos veces.
+```
+Dejalo en un archivo plano. Considera los archivos de la raspi y las sesiones como seguras. Nunca se
+van a usar cuentas importantes, siempre serán cuentas de prueba
+```
+
+Consecuencia: `work/<program>/sessions/<rol>.headers`, 0600, gitignored, escrito por el operador
+(`scripts/set-role.ts`). Sin keyring ni vault. Lo que no se relaja: la credencial no entra en argv ni
+en la cadena (sigue viajando por el config privado de curl), y el modelo solo ve nombres de headers.
+
+### L6 — T5 entregada
+
+| Unidad | Commit | Evidencia |
+|---|---|---|
+| T5 | (este commit) | `src/core/headers.ts`, `src/core/roles.ts`, `role` en `bounty_run`, tool `bounty_session`, `scripts/set-role.ts`, `tests/roles.test.ts` (10 tests) |
+
+Suite completa: 460 tests, 460 pass. Sigue pendiente T4 (`bounty_surface`) y T6 (recon como job).

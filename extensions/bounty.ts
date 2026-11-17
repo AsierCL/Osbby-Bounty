@@ -21,6 +21,7 @@ import { createPiRunner } from "../src/pi/runner.ts";
 import { verifierTaskFor, parseVerdict } from "../src/pi/verifier.ts";
 import { createEvidenceStore } from "../src/core/evidence.ts";
 import { createBoard } from "../src/core/board.ts";
+import { createRoleStore, normalizeRoleName } from "../src/core/roles.ts";
 import { runBoardAction, type BoardAction } from "../src/pi/board-tools.ts";
 import { runSwarm, SWARM_ROLES, summarizeSwarm, swarmTaskFor } from "../src/pi/swarm.ts";
 import { extractJsonArray } from "../src/core/json-extract.ts";
@@ -270,6 +271,10 @@ export default function bountyExtension(pi: PiLike): void {
 					enum: ["subfinder", "httpx", "katana", "nuclei", "gobuster"],
 					description: "Parse this recon tool's JSON/NDJSON output into structured recon-intelligence evidence.",
 				},
+				role: {
+					type: "string",
+					description: "Role session to inject (work/<program>/sessions/<role>.headers). curl only; the credential never enters argv.",
+				},
 			},
 			required: ["program", "tool", "args", "target"],
 		} as never,
@@ -292,6 +297,7 @@ export default function bountyExtension(pi: PiLike): void {
 				...(typeof params.burst === "number" ? { burst: params.burst } : {}),
 				...(params.mass_assignment === true ? { massAssignment: true } : {}),
 				...(params.recon_tool === undefined ? {} : { reconTool: String(params.recon_tool) }),
+				...(params.role === undefined ? {} : { role: String(params.role) }),
 				...(params.method === undefined ? {} : { method: String(params.method) }),
 				...(params.follow_redirects === undefined ? {} : { followRedirects: params.follow_redirects === true }),
 			});
@@ -324,6 +330,64 @@ export default function bountyExtension(pi: PiLike): void {
 				...(params.payload === undefined ? {} : { payload: params.payload }),
 			});
 			return text(result.text, { ok: result.ok });
+		},
+	});
+
+	pi.registerTool({
+		name: "bounty_session",
+		label: "Bounty role sessions",
+		description:
+			"List the role sessions the operator loaded for this program (action=list) or check one (action=check). It reports header NAMES, timestamps and warnings, never a value. A role is used as bounty_run role=<name>; the credential is injected through a private file, never argv.",
+		parameters: {
+			type: "object",
+			additionalProperties: false,
+			properties: {
+				program: { type: "string" },
+				action: { type: "string", enum: ["list", "check"] },
+				role: { type: "string", description: "For check: the role to inspect." },
+			},
+			required: ["program", "action"],
+		} as never,
+		async execute(_toolCallId, params) {
+			const resolved = resolveProgram(params.program);
+			if (!resolved.ok) return text(resolved.text, { ok: false });
+			const session = await sessionFor(resolved.program);
+			const roles = createRoleStore({ workspace: session.paths.workspace });
+
+			if (params.action === "list") {
+				const list = await roles.list();
+				if (list.length === 0) {
+					return text(
+						`No hay roles cargados. El operador crea work/${resolved.program}/sessions/<rol>.headers con un archivo plano (\`Name: value\` por línea, 0600). Roles típicos: anonymous, user-a, user-b, admin. No se inventa una sesión: sin archivo, no hay rol.`,
+						{ ok: true, count: 0 },
+					);
+				}
+				const lines = list.map(
+					(info) =>
+						`- ${info.role} · ${info.headerNames.length === 0 ? "sin headers" : info.headerNames.join(", ")} · ${info.updatedAt === null ? "sin fecha" : info.updatedAt}${info.warnings.length === 0 ? "" : ` · ${info.warnings.join("; ")}`}`,
+				);
+				return text(`Roles cargados:\n${lines.join("\n")}\n\nSe usan con bounty_run role=<rol>. Los valores nunca salen de su archivo.`, { ok: true, count: list.length });
+			}
+
+			if (params.role === undefined) return text("Falta el rol para revisar.", { ok: false });
+			let role: string;
+			try {
+				role = normalizeRoleName(String(params.role));
+			} catch (error) {
+				return text((error as Error).message, { ok: false });
+			}
+			const parsed = await roles.read(role);
+			if (parsed === null) {
+				return text(`El rol "${role}" no existe: falta work/${resolved.program}/sessions/${role}.headers. Lo escribe el operador, no el agente.`, { ok: false });
+			}
+			const warnings = parsed.headers.length === 0 ? ["vacío"] : [];
+			const names = [...new Set(parsed.headers.map((header) => header.name))];
+			const hasAuth = names.some((name) => /^(cookie|authorization)$/i.test(name));
+			if (!hasAuth) warnings.push("no tiene Cookie ni Authorization: probablemente no autentique nada");
+			return text(
+				`Rol ${role}: ${names.join(", ")}\nArchivo: sessions/${role}.headers · ${parsed.headers.length} header(s)${warnings.length === 0 ? " · sin avisos" : `\nAvisos: ${warnings.join("; ")}`}`,
+				{ ok: true, role, headerNames: names, warnings },
+			);
 		},
 	});
 
