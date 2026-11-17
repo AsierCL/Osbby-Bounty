@@ -88,3 +88,39 @@ test("a fresh program starts at zero and the default limit is 500, not 16", asyn
 		await rm(dir, { recursive: true, force: true });
 	}
 });
+
+test("S102: --restart-limits zeroes the counters, records it in the chain, and a reload resumes", async () => {
+	const { restartLimits } = await import("../scripts/restart-limits.ts");
+	const dir = await mkdtemp(join(tmpdir(), "bounty-restart-"));
+	try {
+		await mkdir(join(dir, "work", "lab"), { recursive: true });
+		const scopePath = join(dir, "scope.yaml");
+		await writeFile(scopePath, "program: lab\nlab: true\nauthorized_on: 2026-01-01\nin_scope:\n  - 127.0.0.1:3000\nlimits:\n  rate_rps: 500\n", "utf8");
+		const first = await setup(dir, 2);
+		await first.session.scope({ file: scopePath, confirm: async () => true });
+		assert.equal((await run(first.session, "/a")).ok, true);
+		assert.equal((await run(first.session, "/b")).ok, true);
+		const third = await run(first.session, "/c");
+		assert.equal(third.ok, false, "the limit of 2 must stop the third call");
+
+		const restarted = await restartLimits(dir, "lab", () => Date.parse("2026-11-17T12:00:00Z"));
+		assert.equal(restarted.reset, true);
+		assert.equal(restarted.previous?.toolCalls, 2);
+
+		const state = JSON.parse(await readFile(join(dir, "work", "lab", "state.json"), "utf8"));
+		assert.deepEqual([state.budget.toolCalls, state.budget.tokens, state.budget.limitHit], [0, 0, null]);
+		assert.equal(state.budget.startedAt, "2026-11-17T12:00:00.000Z");
+
+		const chain = (await (await import("../src/core/evidence.ts")).createEvidenceStore(join(dir, "work", "lab", "evidence")).read()).filter((record) => record.kind === "budget-reset");
+		assert.equal(chain.length, 1);
+		assert.equal((chain[0]?.payload as { previous: { toolCalls: number } }).previous.toolCalls, 2);
+
+		// Reload the scope in the same session: the in-memory clock picks up the reset.
+		await first.session.scope({ file: scopePath, confirm: async () => true });
+		assert.equal((await run(first.session, "/d")).ok, true, "after the reset, calls fit again");
+		assert.equal((await run(first.session, "/e")).ok, true);
+		assert.equal((await run(first.session, "/f")).ok, false, "the limit still applies: 2 more, not infinite");
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});

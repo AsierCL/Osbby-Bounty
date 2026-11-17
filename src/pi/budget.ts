@@ -49,6 +49,8 @@ export interface Budget {
 	snapshot(): BudgetSnapshot;
 	/** S101: continue from what the program already spent instead of starting at zero. */
 	restore(snapshot: { toolCalls?: number; tokens?: number; startedAt?: number }): void;
+	/** S102: the operator restarted the limits; the counters go back to zero, exactly. */
+	reset(snapshot?: { toolCalls?: number; tokens?: number; startedAt?: number }): void;
 }
 
 function positiveOr(value: number | undefined, fallback: number): number {
@@ -101,6 +103,12 @@ export function createBudget(policy: BudgetPolicy = {}, now: () => number = () =
 
 		snapshot() {
 			return { toolCalls, tokens: tokensUsed, elapsedMs: now() - startedAt, startedAt };
+		},
+
+		reset(snapshot = {}) {
+			toolCalls = Math.max(0, Math.floor(snapshot.toolCalls ?? 0));
+			tokensUsed = Math.max(0, Math.floor(snapshot.tokens ?? 0));
+			startedAt = typeof snapshot.startedAt === "number" && Number.isFinite(snapshot.startedAt) ? snapshot.startedAt : now();
 		},
 
 		restore(snapshot) {

@@ -250,3 +250,23 @@ en la evidencia **qué claves agregó**.
 Ramas y bucles: cinco firmas idénticas seguidas (403/429/404/5xx/timeout o marca de WAF) en la misma ruta
 abandonan **esa rama** con `loop-detected` en `status.md`. La sesión sigue con otras rutas; no se queda
 insistiendo.
+
+## Reiniciar el reloj y los contadores: `--restart-limits` (S102)
+
+Cuando la corrida se frena por presupuesto, hay un comando pensado para eso, en lugar de editar archivos a
+mano:
+
+```bash
+bin/gentle-bounty --restart-limits underarmour     # un programa
+bin/gentle-bounty --restart-limits --all           # todos
+```
+
+Qué hace: pone a cero **el uso** (`toolCalls`, `tokens`, `startedAt`, el sello de "presupuesto alcanzado")
+en `state.json`, y anota un evento `budget-reset` en la cadena de evidencia con el uso anterior. No toca
+los límites: esos siguen saliendo de `.bounty/config.json`.
+
+Qué **no** hace: no cambia los límites. Si querés más horas o más llamadas, editá `.bounty/config.json`
+(`max_duration_hours`, `max_tool_calls`) — es el otro paso, deliberadamente separado.
+
+Para que una sesión **ya abierta** lo tome: recargá el alcance (`bounty_scope` sobre el mismo archivo,
+que dice "ya lo confirmaste"). El reloj se reinicia en memoria y sigue. Si preferís, reiniciá la sesión.

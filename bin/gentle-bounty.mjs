@@ -231,6 +231,19 @@ async function main(argv) {
 		const { morningReport } = await import("../scripts/lib/morning.ts");
 		process.exit(typeof morningReport === "function" ? (printMorning(await morningReport(process.env.GENTLE_BOUNTY_ROOT ?? process.cwd())) ? 0 : 0) : 0);
 	}
+	// S102: the operator restarts the clock and the counters; the limits stay in .bounty/config.json.
+	const restartIndex = argv.indexOf("--restart-limits");
+	if (restartIndex >= 0) {
+		const target = argv[restartIndex + 1];
+		if (!target || target.startsWith("--")) {
+			console.error("usage: gentle-bounty --restart-limits <programa>|--all");
+			process.exit(2);
+		}
+		const root = process.env.GENTLE_BOUNTY_ROOT ?? process.cwd();
+		const child = spawnSync(process.execPath, ["--experimental-strip-types", join(packageRootOf(), "scripts", "restart-limits.ts"), root, target], { stdio: "inherit" });
+		process.exit(child.status ?? 1);
+	}
+
 	const pendingIndex = argv.indexOf("--pending");
 	if (pendingIndex >= 0) {
 		const target = argv[pendingIndex + 1];

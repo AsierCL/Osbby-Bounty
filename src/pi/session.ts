@@ -411,10 +411,19 @@ export function createSession(config: ProgramConfig, deps: SessionDeps): Program
 			await status.setScopeHash(hash);
 			const previous = await status.read();
 			const alreadyConfirmed = previous.scopeConfirmedHash === hash;
-			// S101: reloading the scope is the operator's way of resuming after extending the budget.
+			// S101/S102: reloading the scope is the operator's resume path. If they ran --restart-limits,
+			// the in-memory clock picks up the reset instead of needing a process restart.
 			if (previous.budget?.limitHit !== null && previous.budget?.limitHit !== undefined) {
 				previous.budget.limitHit = null;
 				await status.write(previous);
+			}
+			if (previous.budget !== undefined && previous.budget !== null) {
+				budgetRestored = true;
+				budget.reset({
+					toolCalls: previous.budget.toolCalls,
+					tokens: previous.budget.tokens,
+					startedAt: Date.parse(previous.budget.startedAt),
+				});
 			}
 
 			policy = parsed.policy;
